@@ -63,4 +63,16 @@ app.get("/fatsecret", async (req, res) => {
   }
 });
 
+// 🔹 My IP endpoint
+app.get("/myip", async (req, res) => {
+  try {
+    const resp = await axios.get("https://api64.ipify.org?format=json");
+    res.json({ ip: resp.data.ip });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ error: "Failed to get IP" });
+  }
+});
+
+
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
