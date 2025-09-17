@@ -29,7 +29,7 @@ async function getAccessToken() {
 
   const resp = await axios.post(
     TOKEN_URL,
-    new URLSearchParams({ grant_type: "client_credentials", scope: "basic" }),
+    new URLSearchParams({ grant_type: "client_credentials", scope: "basic image-recognition" }),
     { auth: { username: CLIENT_ID, password: CLIENT_SECRET } }
   );
 
@@ -91,7 +91,11 @@ async function classifyFood(imageUrlOrPath) {
 
     if (/^https?:\/\//i.test(imageUrlOrPath)) {
       // Download image van URL
-      const resp = await axios.get(imageUrlOrPath, { responseType: "arraybuffer" });
+      const resp = await axios.get(imageUrlOrPath, {
+        responseType: "arraybuffer",
+        maxRedirects: 5
+      });
+
       base64 = Buffer.from(resp.data, "binary").toString("base64");
     } else {
       // Lokale afbeelding
