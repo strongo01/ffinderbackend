@@ -169,7 +169,7 @@ async function classifyFood(imageUrlOrPath) {
 
     // FatSecret API aanroepen (zorg dat token scope 'image-recognition' heeft)
     // Correct voor image recognition
-    const token = await getAccessToken("image-recognition");
+    const token = await getAccessToken("premier");
     const resp = await axios.post(
       "https://platform.fatsecret.com/rest/image-recognition/v2",
       {
