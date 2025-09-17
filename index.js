@@ -168,7 +168,7 @@ async function classifyFood(imageUrlOrPath) {
     if (!base64 || base64.length === 0) throw new Error("Base64 image is empty after download");
 
     // FatSecret API aanroepen (zorg dat token scope 'image-recognition' heeft)
-    const token = await getAccessToken("image");
+    const token = await getAccessToken("basic image-recognition");
     const resp = await axios.post(
       "https://platform.fatsecret.com/rest/image-recognition/v2",
       {
