@@ -17,32 +17,39 @@ const BASE_URL = "https://platform.fatsecret.com/rest/server.api";
 const TOKEN_URL = "https://oauth.fatsecret.com/connect/token";
 
 let cachedToken = null;
-let tokenExpiry = 0;
+let tokenExpiry = {};
+let cachedTokens = {};
 
 // Utility: small axios instance with timeout
 const http = axios.create({ timeout: 15000, maxRedirects: 5 });
 
 // 🔹 Access token ophalen en cachen
-async function getAccessToken() {
+async function getAccessToken(scope = "basic") {
   const now = Date.now();
-  if (cachedToken && now < tokenExpiry) return cachedToken;
+
+  if (cachedTokens[scope] && now < tokenExpiry[scope]) {
+    return cachedTokens[scope];
+  }
 
   const resp = await axios.post(
     TOKEN_URL,
-    new URLSearchParams({ grant_type: "client_credentials", scope: "basic image-recognition" }),
+    new URLSearchParams({
+      grant_type: "client_credentials",
+      scope: scope
+    }),
     { auth: { username: CLIENT_ID, password: CLIENT_SECRET } }
   );
 
-  cachedToken = resp.data.access_token;
-  tokenExpiry = now + resp.data.expires_in * 1000 - 5000; // 5 sec marge
-  console.log("✅ Access Token verkregen");
-  return cachedToken;
+  cachedTokens[scope] = resp.data.access_token;
+  tokenExpiry[scope] = now + resp.data.expires_in * 1000 - 5000;
+  console.log(`✅ Access Token verkregen voor scope: ${scope}`);
+  return cachedTokens[scope];
 }
 
 // 🔹 Functie om FatSecret API aan te roepen
 async function callFatSecret(params, title) {
   try {
-    const token = await getAccessToken();
+    const token = await getAccessToken("basic");
     const resp = await axios.get(BASE_URL, {
       headers: { Authorization: `Bearer ${token}` },
       params,
@@ -161,7 +168,7 @@ async function classifyFood(imageUrlOrPath) {
     if (!base64 || base64.length === 0) throw new Error("Base64 image is empty after download");
 
     // FatSecret API aanroepen (zorg dat token scope 'image-recognition' heeft)
-    const token = await getAccessToken();
+    const token = await getAccessToken("image");
     const resp = await axios.post(
       "https://platform.fatsecret.com/rest/image-recognition/v2",
       {
