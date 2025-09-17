@@ -85,25 +85,82 @@ async function callOpenFoodFacts(barcode) {
 }
 
 // 🔹 FatSecret Image Recognition
+// 🔹 FatSecret Image Recognition (robust download + diagnostics)
 async function classifyFood(imageUrlOrPath) {
   try {
     let base64;
 
     if (/^https?:\/\//i.test(imageUrlOrPath)) {
-      // Download image van URL
-      const resp = await axios.get(imageUrlOrPath, {
-        responseType: "arraybuffer",
-        maxRedirects: 5
-      });
+      // Candidate URLs: original and encoded (handles spaces / weird chars)
+      const candidates = [imageUrlOrPath, encodeURI(imageUrlOrPath)];
+      let buf = null;
+      let lastErr = null;
 
-      base64 = Buffer.from(resp.data, "binary").toString("base64");
+      // Browser-like headers to avoid hotlink blocking
+      const headers = {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
+        Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+      };
+
+      for (const candidate of candidates) {
+        try {
+          const resp = await http.get(candidate, {
+            responseType: "arraybuffer",
+            headers: { ...headers, Referer: candidate },
+            maxRedirects: 5,
+            // increase max body size if needed
+            maxContentLength: 50 * 1024 * 1024,
+            validateStatus: status => status >= 200 && status < 400, // accept 3xx (axios will handle redirects)
+          });
+
+          console.log("→ download status:", resp.status);
+          console.log("→ content-type:", resp.headers["content-type"]);
+
+          if (!resp.data || resp.data.length === 0) {
+            lastErr = new Error("Lege response body");
+            console.warn("Waarschuwing: lege body voor", candidate);
+            continue;
+          }
+
+          buf = Buffer.from(resp.data, "binary");
+          break;
+        } catch (err) {
+          lastErr = err;
+          console.warn(`Download poging mislukt voor ${candidate}:`, err.message);
+          if (err.response) {
+            console.warn("Response status:", err.response.status);
+          }
+          // probeer volgende candidate
+        }
+      }
+
+      if (!buf) {
+        // gedetailleerde fout teruggeven voor debugging
+        const message = lastErr?.response?.status
+          ? `Image download failed with status ${lastErr.response.status}`
+          : `Image download failed: ${lastErr?.message || "unknown"}`;
+        throw new Error(message);
+      }
+
+      // Optioneel: check minimale grootte
+      if (buf.length < 1000) {
+        console.warn("Waarschuwing: gedownloade afbeelding is erg klein:", buf.length, "bytes");
+      }
+
+      base64 = buf.toString("base64");
+      console.log("📸 Base64 length:", base64.length);
     } else {
       // Lokale afbeelding
       if (!fs.existsSync(imageUrlOrPath)) throw new Error("Lokale afbeelding niet gevonden: " + imageUrlOrPath);
       base64 = fs.readFileSync(imageUrlOrPath, { encoding: "base64" });
+      console.log("📸 Base64 length (local):", base64.length);
     }
 
-    // FatSecret API aanroepen
+    // Basic sanity check
+    if (!base64 || base64.length === 0) throw new Error("Base64 image is empty after download");
+
+    // FatSecret API aanroepen (zorg dat token scope 'image-recognition' heeft)
     const token = await getAccessToken();
     const resp = await axios.post(
       "https://platform.fatsecret.com/rest/image-recognition/v2",
@@ -112,17 +169,17 @@ async function classifyFood(imageUrlOrPath) {
         region: "NL",         // of "US", "FR", etc.
         language: "nl",
         include_food_data: true,
-        eaten_foods: []       // Optioneel: array van eerder gegeten voedingsmiddelen
+        eaten_foods: []
       },
       {
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json"
-        }
+        },
+        timeout: 30000
       }
     );
 
-    // Resultaten loggen
     const data = resp.data;
     if (data && data.foods && data.foods.length > 0) {
       data.foods.forEach(food => {
@@ -139,10 +196,11 @@ async function classifyFood(imageUrlOrPath) {
     }
 
     return data;
-
   } catch (err) {
-    console.error("Fout bij FatSecret Image Recognition:", err.response?.data || err.message);
-    return { error: err.message, details: err.response?.data };
+    // show deeper debug info when axios gave a Buffer or empty body
+    const details = err.response?.data ?? err.message;
+    console.error("Fout bij FatSecret Image Recognition:", details);
+    return { error: err.message, details: err.response?.data ?? null };
   }
 }
 
