@@ -17,39 +17,32 @@ const BASE_URL = "https://platform.fatsecret.com/rest/server.api";
 const TOKEN_URL = "https://oauth.fatsecret.com/connect/token";
 
 let cachedToken = null;
-let tokenExpiry = {};
-let cachedTokens = {};
+let tokenExpiry = 0;
 
 // Utility: small axios instance with timeout
 const http = axios.create({ timeout: 15000, maxRedirects: 5 });
 
 // 🔹 Access token ophalen en cachen
-async function getAccessToken(scope = "basic") {
+async function getAccessToken() {
   const now = Date.now();
-
-  if (cachedTokens[scope] && now < tokenExpiry[scope]) {
-    return cachedTokens[scope];
-  }
+  if (cachedToken && now < tokenExpiry) return cachedToken;
 
   const resp = await axios.post(
     TOKEN_URL,
-    new URLSearchParams({
-      grant_type: "client_credentials",
-      scope: scope
-    }),
+    new URLSearchParams({ grant_type: "client_credentials", scope: "basic" }),
     { auth: { username: CLIENT_ID, password: CLIENT_SECRET } }
   );
 
-  cachedTokens[scope] = resp.data.access_token;
-  tokenExpiry[scope] = now + resp.data.expires_in * 1000 - 5000;
-  console.log(`✅ Access Token verkregen voor scope: ${scope}`);
-  return cachedTokens[scope];
+  cachedToken = resp.data.access_token;
+  tokenExpiry = now + resp.data.expires_in * 1000 - 5000; // 5 sec marge
+  console.log("✅ Access Token verkregen");
+  return cachedToken;
 }
 
 // 🔹 Functie om FatSecret API aan te roepen
 async function callFatSecret(params, title) {
   try {
-    const token = await getAccessToken("basic");
+    const token = await getAccessToken();
     const resp = await axios.get(BASE_URL, {
       headers: { Authorization: `Bearer ${token}` },
       params,
@@ -58,7 +51,8 @@ async function callFatSecret(params, title) {
     console.log(`\n🔹 ${title}`);
     console.log(`Methode: ${params.method}`);
     console.log(`Status: ${resp.status}`);
-    return resp.data;
+console.log('API Response Data:', JSON.stringify(resp.data, null, 2)); // Voeg deze regel toe
+return resp.data;
   } catch (err) {
     console.error(`Fout bij ${title}:`, err.response?.data || err.message);
     return { error: err.message };
@@ -92,84 +86,22 @@ async function callOpenFoodFacts(barcode) {
 }
 
 // 🔹 FatSecret Image Recognition
-// 🔹 FatSecret Image Recognition (robust download + diagnostics)
 async function classifyFood(imageUrlOrPath) {
   try {
     let base64;
 
     if (/^https?:\/\//i.test(imageUrlOrPath)) {
-      // Candidate URLs: original and encoded (handles spaces / weird chars)
-      const candidates = [imageUrlOrPath, encodeURI(imageUrlOrPath)];
-      let buf = null;
-      let lastErr = null;
-
-      // Browser-like headers to avoid hotlink blocking
-      const headers = {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
-        Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-      };
-
-      for (const candidate of candidates) {
-        try {
-          const resp = await http.get(candidate, {
-            responseType: "arraybuffer",
-            headers: { ...headers, Referer: candidate },
-            maxRedirects: 5,
-            // increase max body size if needed
-            maxContentLength: 50 * 1024 * 1024,
-            validateStatus: status => status >= 200 && status < 400, // accept 3xx (axios will handle redirects)
-          });
-
-          console.log("→ download status:", resp.status);
-          console.log("→ content-type:", resp.headers["content-type"]);
-
-          if (!resp.data || resp.data.length === 0) {
-            lastErr = new Error("Lege response body");
-            console.warn("Waarschuwing: lege body voor", candidate);
-            continue;
-          }
-
-          buf = Buffer.from(resp.data, "binary");
-          break;
-        } catch (err) {
-          lastErr = err;
-          console.warn(`Download poging mislukt voor ${candidate}:`, err.message);
-          if (err.response) {
-            console.warn("Response status:", err.response.status);
-          }
-          // probeer volgende candidate
-        }
-      }
-
-      if (!buf) {
-        // gedetailleerde fout teruggeven voor debugging
-        const message = lastErr?.response?.status
-          ? `Image download failed with status ${lastErr.response.status}`
-          : `Image download failed: ${lastErr?.message || "unknown"}`;
-        throw new Error(message);
-      }
-
-      // Optioneel: check minimale grootte
-      if (buf.length < 1000) {
-        console.warn("Waarschuwing: gedownloade afbeelding is erg klein:", buf.length, "bytes");
-      }
-
-      base64 = buf.toString("base64");
-      console.log("📸 Base64 length:", base64.length);
+      // Download image van URL
+      const resp = await axios.get(imageUrlOrPath, { responseType: "arraybuffer" });
+      base64 = Buffer.from(resp.data, "binary").toString("base64");
     } else {
       // Lokale afbeelding
       if (!fs.existsSync(imageUrlOrPath)) throw new Error("Lokale afbeelding niet gevonden: " + imageUrlOrPath);
       base64 = fs.readFileSync(imageUrlOrPath, { encoding: "base64" });
-      console.log("📸 Base64 length (local):", base64.length);
     }
 
-    // Basic sanity check
-    if (!base64 || base64.length === 0) throw new Error("Base64 image is empty after download");
-
-    // FatSecret API aanroepen (zorg dat token scope 'image-recognition' heeft)
-    // Correct voor image recognition
-    const token = await getAccessToken("premier");
+    // FatSecret API aanroepen
+    const token = await getAccessToken();
     const resp = await axios.post(
       "https://platform.fatsecret.com/rest/image-recognition/v2",
       {
@@ -177,17 +109,17 @@ async function classifyFood(imageUrlOrPath) {
         region: "NL",         // of "US", "FR", etc.
         language: "nl",
         include_food_data: true,
-        eaten_foods: []
+        eaten_foods: []       // Optioneel: array van eerder gegeten voedingsmiddelen
       },
       {
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json"
-        },
-        timeout: 30000
+        }
       }
     );
 
+    // Resultaten loggen
     const data = resp.data;
     if (data && data.foods && data.foods.length > 0) {
       data.foods.forEach(food => {
@@ -204,11 +136,10 @@ async function classifyFood(imageUrlOrPath) {
     }
 
     return data;
+
   } catch (err) {
-    // show deeper debug info when axios gave a Buffer or empty body
-    const details = err.response?.data ?? err.message;
-    console.error("Fout bij FatSecret Image Recognition:", details);
-    return { error: err.message, details: err.response?.data ?? null };
+    console.error("Fout bij FatSecret Image Recognition:", err.response?.data || err.message);
+    return { error: err.message, details: err.response?.data };
   }
 }
 
