@@ -1,4 +1,3 @@
-// index.js
 import fs from "fs";
 import express from "express";
 import axios from "axios";
@@ -10,19 +9,17 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// 🔹 FatSecret OAuth2 credentials
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
+
 const BASE_URL = "https://platform.fatsecret.com/rest/server.api";
 const TOKEN_URL = "https://oauth.fatsecret.com/connect/token";
 
 let cachedToken = null;
 let tokenExpiry = 0;
 
-// Utility: small axios instance with timeout
 const http = axios.create({ timeout: 15000, maxRedirects: 5 });
 
-// 🔹 Access token ophalen en cachen
 async function getAccessToken() {
   const now = Date.now();
   if (cachedToken && now < tokenExpiry) return cachedToken;
@@ -34,12 +31,11 @@ async function getAccessToken() {
   );
 
   cachedToken = resp.data.access_token;
-  tokenExpiry = now + resp.data.expires_in * 1000 - 5000; // 5 sec marge
+  tokenExpiry = now + resp.data.expires_in * 1000 - 5000;
   console.log("✅ Access Token verkregen");
   return cachedToken;
 }
 
-// 🔹 Functie om FatSecret API aan te roepen
 async function callFatSecret(params, title) {
   try {
     const token = await getAccessToken();
@@ -51,7 +47,7 @@ async function callFatSecret(params, title) {
     console.log(`\n🔹 ${title}`);
     console.log(`Methode: ${params.method}`);
     console.log(`Status: ${resp.status}`);
-console.log('API Response Data:', JSON.stringify(resp.data, null, 2)); // Voeg deze regel toe
+console.log('API Response Data:', JSON.stringify(resp.data, null, 2)); 
 return resp.data;
   } catch (err) {
     console.error(`Fout bij ${title}:`, err.response?.data || err.message);
@@ -59,7 +55,6 @@ return resp.data;
   }
 }
 
-// 🔹 OpenFoodFacts lookup met alleen relevante info
 async function callOpenFoodFacts(barcode) {
   try {
     const url = `https://world.openfoodfacts.org/api/v0/product/${barcode}.json`;
@@ -85,66 +80,6 @@ async function callOpenFoodFacts(barcode) {
   }
 }
 
-// 🔹 FatSecret Image Recognition
-async function classifyFood(imageUrlOrPath) {
-  try {
-    let base64;
-
-    if (/^https?:\/\//i.test(imageUrlOrPath)) {
-      // Download image van URL
-      const resp = await axios.get(imageUrlOrPath, { responseType: "arraybuffer" });
-      base64 = Buffer.from(resp.data, "binary").toString("base64");
-    } else {
-      // Lokale afbeelding
-      if (!fs.existsSync(imageUrlOrPath)) throw new Error("Lokale afbeelding niet gevonden: " + imageUrlOrPath);
-      base64 = fs.readFileSync(imageUrlOrPath, { encoding: "base64" });
-    }
-
-    // FatSecret API aanroepen
-    const token = await getAccessToken();
-    const resp = await axios.post(
-      "https://platform.fatsecret.com/rest/image-recognition/v2",
-      {
-        image_b64: base64,
-        region: "NL",         // of "US", "FR", etc.
-        language: "nl",
-        include_food_data: true,
-        eaten_foods: []       // Optioneel: array van eerder gegeten voedingsmiddelen
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        }
-      }
-    );
-
-    // Resultaten loggen
-    const data = resp.data;
-    if (data && data.foods && data.foods.length > 0) {
-      data.foods.forEach(food => {
-        console.log(`🍽 ${food.food_name} - ${food.serving_description || ""}`);
-        if (food.nutritional_info) {
-          console.log(`   Calories: ${food.nutritional_info.calories || "Onbekend"} kcal`);
-          console.log(`   Proteins: ${food.nutritional_info.protein || "Onbekend"} g`);
-          console.log(`   Fat: ${food.nutritional_info.fat || "Onbekend"} g`);
-          console.log(`   Carbs: ${food.nutritional_info.carbohydrates || "Onbekend"} g`);
-        }
-      });
-    } else {
-      console.log("Geen voedsel herkend in afbeelding");
-    }
-
-    return data;
-
-  } catch (err) {
-    console.error("Fout bij FatSecret Image Recognition:", err.response?.data || err.message);
-    return { error: err.message, details: err.response?.data };
-  }
-}
-
-
-// 🔹 Express routes (proxy endpoints)
 app.get("/search", async (req, res) => {
   const { query } = req.query;
   if (!query) return res.status(400).json({ error: "query param ontbreekt" });
@@ -172,14 +107,4 @@ app.get("/barcode", async (req, res) => {
   res.json(data);
 });
 
-app.get("/image", async (req, res) => {
-  const { imageurl } = req.query;
-  if (!imageurl) return res.status(400).json({ error: "imageurl param ontbreekt" });
-
-  const data = await classifyFood(imageurl);
-  res.json(data);
-});
-
-
-// 🔹 Server starten
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
