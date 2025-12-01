@@ -9,8 +9,10 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-const CLIENT_ID = process.env.CLIENT_ID;
-const CLIENT_SECRET = process.env.CLIENT_SECRET;
+//const CLIENT_ID = process.env.CLIENT_ID;
+//const CLIENT_SECRET = process.env.CLIENT_SECRET;
+const CLIENT_ID = '3a0612b2d23f4089830e43ad88a34697';
+const CLIENT_SECRET = '86befba1f8484a9c954da338610313c7';
 
 const BASE_URL = "https://platform.fatsecret.com/rest/server.api";
 const TOKEN_URL = "https://oauth.fatsecret.com/connect/token";
@@ -47,8 +49,8 @@ async function callFatSecret(params, title) {
     console.log(`\n🔹 ${title}`);
     console.log(`Methode: ${params.method}`);
     console.log(`Status: ${resp.status}`);
-console.log('API Response Data:', JSON.stringify(resp.data, null, 2)); 
-return resp.data;
+    console.log('API Response Data:', JSON.stringify(resp.data, null, 2));
+    return resp.data;
   } catch (err) {
     console.error(`Fout bij ${title}:`, err.response?.data || err.message);
     return { error: err.message };
@@ -106,5 +108,79 @@ app.get("/barcode", async (req, res) => {
   const data = await callOpenFoodFacts(code);
   res.json(data);
 });
+
+
+app.get("/recipes/random", async (req, res) => {
+  try {
+    console.log("🔄 Willekeurige recepten ophalen...");
+
+    const randomPage = Math.floor(Math.random() * 50) + 1; 
+    console.log(`📄 Random pagina: ${randomPage}`);
+
+    const search = await callFatSecret(
+      {
+        method: "recipes.search.v3",
+        search_expression: "",        
+        page_number: randomPage,
+        max_results: 20,              
+        format: "json",
+        region: "nl"
+      },
+      `Recepten ophalen pagina ${randomPage}`
+    );
+
+    const list = search?.recipes?.recipe || [];
+
+    if (!Array.isArray(list) || list.length === 0) {
+      return res.status(200).json({ error: "Geen recepten ontvangen van FatSecret." });
+    }
+
+    const shuffled = [...list].sort(() => Math.random() - 0.5);
+    const selected = shuffled.slice(0, 5);
+
+    const detailPromises = selected.map(item => {
+      const id = item.recipe_id;
+      if (!id) return Promise.resolve(null);
+
+      return callFatSecret(
+        {
+          method: "recipe.get.v2", 
+          recipe_id: id,
+          format: "json",
+          region: "nl",
+        },
+        `Recept detail ${id}`
+      ).catch(err => {
+        console.error(`Detail fetch failed for ${id}:`, err);
+        return null;
+      });
+    });
+
+   const settled = await Promise.allSettled(detailPromises);
+
+    const results = settled
+      .filter(s => s.status === "fulfilled" && s.value && s.value.recipe)
+      .map(s => {
+        const data = s.value.recipe;
+        return {
+          recipe_id: data.recipe_id ?? data.recipeId ?? null,
+          recipe_name: data.recipe_name ?? data.recipe_name ?? data.recipe_title ?? '',
+          recipe_image: data.recipe_image ?? data.recipeImage ?? '',
+          description: data.recipe_description ?? data.description ?? '',
+          ingredients: (data.recipe_ingredients?.ingredient) || data.ingredients || [],
+          directions: data.recipe_directions ?? data.directions ?? data.directions_list ?? '',
+        };
+      });
+
+    res.json({ recipes: results });
+
+  } catch (err) {
+    console.error("Fout bij random recipes:", err);
+    res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+
+
 
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
