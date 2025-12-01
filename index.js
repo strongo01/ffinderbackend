@@ -9,10 +9,8 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-//const CLIENT_ID = process.env.CLIENT_ID;
-//const CLIENT_SECRET = process.env.CLIENT_SECRET;
-const CLIENT_ID = '3a0612b2d23f4089830e43ad88a34697';
-const CLIENT_SECRET = '86befba1f8484a9c954da338610313c7';
+const CLIENT_ID = process.env.CLIENT_ID;
+const CLIENT_SECRET = process.env.CLIENT_SECRET;
 
 const BASE_URL = "https://platform.fatsecret.com/rest/server.api";
 const TOKEN_URL = "https://oauth.fatsecret.com/connect/token";
