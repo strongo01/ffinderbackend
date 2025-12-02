@@ -4,17 +4,14 @@ export default async function handler(req, res) {
   try {
     const randomPage = Math.floor(Math.random() * 50) + 1;
 
-    const search = await callFatSecret(
-      {
-        method: "recipes.search.v3",
-        search_expression: "",
-        page_number: randomPage,
-        max_results: 20,
-        format: "json",
-        region: "nl"
-      },
-      `Recepten ophalen pagina ${randomPage}`
-    );
+    const search = await callFatSecret({
+      method: "recipes.search.v3",
+      search_expression: "",
+      page_number: randomPage,
+      max_results: 20,
+      format: "json",
+      region: "nl"
+    });
 
     const list = search?.recipes?.recipe || [];
 
@@ -26,17 +23,13 @@ export default async function handler(req, res) {
     const selected = shuffled.slice(0, 5);
 
     const detailPromises = selected.map(item => {
-      if (!item.recipe_id) return null;
-
-      return callFatSecret(
-        {
-          method: "recipe.get.v2",
-          recipe_id: item.recipe_id,
-          format: "json",
-          region: "nl"
-        },
-        `Recept detail ${item.recipe_id}`
-      );
+      if (!item?.recipe_id) return null;
+      return callFatSecret({
+        method: "recipe.get.v2",
+        recipe_id: item.recipe_id,
+        format: "json",
+        region: "nl"
+      });
     });
 
     const settled = await Promise.all(detailPromises);

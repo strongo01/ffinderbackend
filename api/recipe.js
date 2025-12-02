@@ -8,8 +8,7 @@ export default async function handler(req, res) {
   }
 
   const data = await callFatSecret(
-    { method: "recipes.search.v3", search_expression: query, format: "json", region: "nl" },
-    `Zoeken naar recepten: ${query}`
+    { method: "recipes.search.v3", search_expression: query, format: "json", region: "nl" }
   );
 
   res.json(data);
