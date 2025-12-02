@@ -1,4 +1,4 @@
-import fs from "fs";
+/*import fs from "fs";
 import express from "express";
 import axios from "axios";
 import dotenv from "dotenv";
@@ -182,3 +182,4 @@ app.get("/recipes/random", async (req, res) => {
 
 
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+*/
