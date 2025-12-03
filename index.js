@@ -2,21 +2,29 @@ import fs from "fs";
 import express from "express";
 import axios from "axios";
 import dotenv from "dotenv";
+import cors from "cors";
 
 dotenv.config();
 
+const app = express(); // <-- eerst app maken
+
+// CORS middleware
+app.use(cors({
+    origin: ['http://localhost:5173', 'https://jouw-web-domein.nl'], // of '*' voor dev
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'x-app-key'],
+}));
+
+app.use(express.json());
+
+// Validate x-app-key
 function validateAppKey(req, res, next) {
     const key = req.headers["x-app-key"];
-
     if (!key || key !== process.env.APP_SECRET_KEY) {
         return res.status(401).json({ error: "Unauthorized: invalid app key" });
     }
-
     next();
 }
-
-const app = express();
-app.use(express.json());
 app.use(validateAppKey);
 
 
