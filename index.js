@@ -10,7 +10,7 @@ const app = express(); // <-- eerst app maken
 
 // CORS middleware
 app.use(cors({
-    origin: ['http://localhost:5173', 'https://jouw-web-domein.nl'], // of '*' voor dev
+    origin: ['https://ffinder.nl', 'http://ffinder.nl'],
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'x-app-key'],
 }));
