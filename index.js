@@ -6,11 +6,11 @@ import cors from "cors";
 
 dotenv.config();
 
-const app = express(); // <-- eerst app maken
+const app = express(); 
 
 // CORS middleware
 app.use(cors({
-    origin: ['https://ffinder.nl', 'http://ffinder.nl'],
+    origin: ['https://ffinder.nl', 'http://ffinder.nl', 'http://localhost:3000'],
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'x-app-key'],
 }));
@@ -20,7 +20,7 @@ app.use(express.json());
 // Validate x-app-key
 function validateAppKey(req, res, next) {
     const key = req.headers["x-app-key"];
-    if (!key || key !== process.env.APP_SECRET_KEY) {
+    if (!key || key !== process.env.APP_KEY) {
         return res.status(401).json({ error: "Unauthorized: invalid app key" });
     }
     next();
