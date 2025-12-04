@@ -1,23 +1,24 @@
-import fs from "fs";
 import express from "express";
 import axios from "axios";
 import dotenv from "dotenv";
-import cors from "cors";
 
 dotenv.config();
 
-const app = express(); 
-
-// CORS middleware
-app.use(cors({
-    origin: ['https://ffinder.nl', 'http://ffinder.nl', 'http://localhost:3000'],
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'x-app-key'],
-}));
+const app = express();
 
 app.use(express.json());
 
-// Validate x-app-key
+// CORS + OPTIONS handling
+app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", req.headers.origin || "*");
+    res.header("Access-Control-Allow-Headers", "Content-Type, x-app-key");
+    res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+
+    if (req.method === "OPTIONS") return res.sendStatus(200);
+    next();
+});
+
+// Validate x-app-key (except OPTIONS)
 function validateAppKey(req, res, next) {
     const key = req.headers["x-app-key"];
     if (!key || key !== process.env.APP_KEY) {
@@ -25,7 +26,11 @@ function validateAppKey(req, res, next) {
     }
     next();
 }
-app.use(validateAppKey);
+
+app.use((req, res, next) => {
+    if (req.method === "OPTIONS") return next();
+    validateAppKey(req, res, next);
+});
 
 
 const PORT = process.env.PORT || 3000;
