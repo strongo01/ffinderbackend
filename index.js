@@ -1,210 +1,91 @@
 import express from "express";
-import axios from "axios";
+import { MongoClient } from "mongodb";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-const app = express();
+const uri = process.env.MONGO_URI;
+const client = new MongoClient(uri);
 
+await client.connect();
+const db = client.db("off_db");
+const products = db.collection("products");
+
+const app = express();
 app.use(express.json());
 
-// CORS + OPTIONS handling
 app.use((req, res, next) => {
-    res.header("Access-Control-Allow-Origin", req.headers.origin || "*");
-    res.header("Access-Control-Allow-Headers", "Content-Type, x-app-key");
-    res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-
-    if (req.method === "OPTIONS") return res.sendStatus(200);
-    next();
+  const appKey = req.headers["x-app-key"];
+  if (!appKey || appKey !== process.env.APP_KEY) {
+    return res.status(401).json({ error: "Ongeldige of ontbrekende API key" });
+  }
+  next();
 });
 
-// Validate x-app-key (except OPTIONS)
-function validateAppKey(req, res, next) {
-    const key = req.headers["x-app-key"];
-    if (!key || key !== process.env.APP_KEY) {
-        return res.status(401).json({ error: "Unauthorized: invalid app key" });
-    }
-    next();
+
+// Barcode herkenning
+function isBarcode(str) {
+  return /^[0-9]{8,14}$/.test(str);
 }
 
-app.use((req, res, next) => {
-    if (req.method === "OPTIONS") return next();
-    validateAppKey(req, res, next);
-});
+// Product formatter
+function formatProduct(p) {
+  if (!p) return null;
+  const n = p.nutriments || {};
+  const tags = Array.isArray(p.ingredients_analysis_tags) ? p.ingredients_analysis_tags : [];
+  const imageUrl =
+    p.image_url ||
+    p.image_front_url ||
+    p.selected_images?.front?.display?.en ||
+    p.image_front_small_url ||
+    p.image_small_url ||
+    null;
 
-
-const PORT = process.env.PORT || 3000;
-
-const CLIENT_ID = process.env.CLIENT_ID;
-const CLIENT_SECRET = process.env.CLIENT_SECRET;
-
-const BASE_URL = "https://platform.fatsecret.com/rest/server.api";
-const TOKEN_URL = "https://oauth.fatsecret.com/connect/token";
-
-let cachedToken = null;
-let tokenExpiry = 0;
-
-const http = axios.create({ timeout: 15000, maxRedirects: 5 });
-
-async function getAccessToken() {
-    const now = Date.now();
-    if (cachedToken && now < tokenExpiry) return cachedToken;
-
-    const resp = await axios.post(
-        TOKEN_URL,
-        new URLSearchParams({ grant_type: "client_credentials", scope: "basic" }),
-        { auth: { username: CLIENT_ID, password: CLIENT_SECRET } }
-    );
-
-    cachedToken = resp.data.access_token;
-    tokenExpiry = now + resp.data.expires_in * 1000 - 5000;
-    console.log("✅ Access Token verkregen");
-    return cachedToken;
+  return {
+    barcode: p.code || null,
+    product_name: p.product_name || null,
+    nutriscore: p.nutriscore_grade || null,
+    nutriments: {
+      energy_kcal: n["energy-kcal_100g"] ?? null,
+      fat: n.fat_100g ?? null,
+      saturated_fat: n["saturated-fat_100g"] ?? null,
+      carbohydrates: n.carbohydrates_100g ?? null,
+      sugars: n.sugars_100g ?? null,
+      fiber: n.fiber_100g ?? null,
+      proteins: n.proteins_100g ?? null,
+      salt: n.salt_100g ?? null,
+    },
+    ingredients: p.ingredients_text || null,
+    vegan: tags.includes("en:vegan"),
+    vegetarian: tags.includes("en:vegetarian"),
+    image_url: imageUrl,
+  };
 }
 
-async function callFatSecret(params, title) {
-    try {
-        const token = await getAccessToken();
-        const resp = await axios.get(BASE_URL, {
-            headers: { Authorization: `Bearer ${token}` },
-            params,
-        });
+// Unified endpoint
+app.get("/product", async (req, res) => {
+  const query = req.query.q;
+  if (!query) return res.status(400).json({ error: "q ontbreekt" });
 
-        console.log(`\n🔹 ${title}`);
-        console.log(`Methode: ${params.method}`);
-        console.log(`Status: ${resp.status}`);
-        console.log('API Response Data:', JSON.stringify(resp.data, null, 2));
-        return resp.data;
-    } catch (err) {
-        console.error(`Fout bij ${title}:`, err.response?.data || err.message);
-        return { error: err.message };
-    }
-}
+  let results = [];
 
-async function callOpenFoodFacts(barcode) {
-    try {
-        const url = `https://world.openfoodfacts.org/api/v0/product/${barcode}.json`;
-        const resp = await axios.get(url);
-        const product = resp.data.product || {};
+  if (isBarcode(query)) {
+    const p = await products.findOne({ code: query });
+    if (p) results.push(formatProduct(p));
+  } else {
+    const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(escapedQuery.split(" ").join("|"), "i");
 
-        console.log(`\n🔹 Barcode lookup: ${barcode}`);
-        console.log(`Naam: ${product.product_name || "Onbekend"}`);
-        console.log(`Merk: ${product.brands || "Onbekend"}`);
-        console.log(`Inhoud: ${product.quantity || "Onbekend"}`);
+    const cursor = products
+      .find({ $or: [{ product_name: regex }, { generic_name: regex }, { brands: regex }] })
+      .limit(20);
 
-        const nutriments = product.nutriments || {};
-        console.log(`Calorieën: ${nutriments["energy-kcal_100g"] ?? "Onbekend"} kcal/100g`);
-        console.log(`Eiwit: ${nutriments["proteins_100g"] ?? "Onbekend"} g/100g`);
-        console.log(`Vet: ${nutriments["fat_100g"] ?? "Onbekend"} g/100g`);
-        console.log(`Koolhydraten: ${nutriments["carbohydrates_100g"] ?? "Onbekend"} g/100g`);
+    results = (await cursor.toArray()).map(formatProduct);
+  }
 
-        if (product.image_front_url) console.log(`Afbeelding: ${product.image_front_url}`);
-        return product;
-    } catch (err) {
-        console.error(`Fout bij OpenFoodFacts:`, err.response?.data || err.message);
-        return { error: err.message };
-    }
-}
-
-app.get("/search", async (req, res) => {
-    const { query } = req.query;
-    if (!query) return res.status(400).json({ error: "query param ontbreekt" });
-    const data = await callFatSecret(
-        { method: "foods.search", search_expression: query, format: "json", region: "nl" },
-        `Zoeken op naam: ${query}`
-    );
-    res.json(data);
-});
-
-app.get("/recipe", async (req, res) => {
-    const { query } = req.query;
-    if (!query) return res.status(400).json({ error: "query param ontbreekt" });
-    const data = await callFatSecret(
-        { method: "recipes.search.v3", search_expression: query, format: "json", region: "nl" },
-        `Zoeken naar recepten: ${query}`
-    );
-    res.json(data);
-});
-
-app.get("/barcode", async (req, res) => {
-    const { code } = req.query;
-    if (!code) return res.status(400).json({ error: "code param ontbreekt" });
-    const data = await callOpenFoodFacts(code);
-    res.json(data);
+  // Wrap in foods.food zodat Flutter werkt
+  res.json({ foods: { food: results } });
 });
 
 
-app.get("/recipes/random", async (req, res) => {
-    try {
-        console.log("🔄 Willekeurige recepten ophalen...");
-
-        const randomPage = Math.floor(Math.random() * 50) + 1;
-        console.log(`📄 Random pagina: ${randomPage}`);
-
-        const search = await callFatSecret(
-            {
-                method: "recipes.search.v3",
-                search_expression: "",
-                page_number: randomPage,
-                max_results: 20,
-                format: "json",
-                region: "nl"
-            },
-            `Recepten ophalen pagina ${randomPage}`
-        );
-
-        const list = search?.recipes?.recipe || [];
-
-        if (!Array.isArray(list) || list.length === 0) {
-            return res.status(200).json({ error: "Geen recepten ontvangen van FatSecret." });
-        }
-
-        const shuffled = [...list].sort(() => Math.random() - 0.5);
-        const selected = shuffled.slice(0, 5);
-
-        const detailPromises = selected.map(item => {
-            const id = item.recipe_id;
-            if (!id) return Promise.resolve(null);
-
-            return callFatSecret(
-                {
-                    method: "recipe.get.v2",
-                    recipe_id: id,
-                    format: "json",
-                    region: "nl",
-                },
-                `Recept detail ${id}`
-            ).catch(err => {
-                console.error(`Detail fetch failed for ${id}:`, err);
-                return null;
-            });
-        });
-
-        const settled = await Promise.allSettled(detailPromises);
-
-        const results = settled
-            .filter(s => s.status === "fulfilled" && s.value && s.value.recipe)
-            .map(s => {
-                const data = s.value.recipe;
-                return {
-                    recipe_id: data.recipe_id ?? data.recipeId ?? null,
-                    recipe_name: data.recipe_name ?? data.recipe_name ?? data.recipe_title ?? '',
-                    recipe_image: data.recipe_image ?? data.recipeImage ?? '',
-                    description: data.recipe_description ?? data.description ?? '',
-                    ingredients: (data.recipe_ingredients?.ingredient) || data.ingredients || [],
-                    directions: data.recipe_directions ?? data.directions ?? data.directions_list ?? '',
-                };
-            });
-
-        res.json({ recipes: results });
-
-    } catch (err) {
-        console.error("Fout bij random recipes:", err);
-        res.status(500).json({ error: err.message || String(err) });
-    }
-});
-
-
-
-
-app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+app.listen(3000, "0.0.0.0", () => console.log("🚀 Server running on port 3000"));
