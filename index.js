@@ -44,6 +44,7 @@ function formatProduct(p) {
   return {
     barcode: p.code || null,
     product_name: p.product_name || null,
+    brands: p.brands || p.brand || null,
     nutriscore: p.nutriscore_grade || null,
     nutriments: {
       energy_kcal: n["energy-kcal_100g"] ?? null,
