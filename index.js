@@ -78,7 +78,7 @@ app.get("/product", async (req, res) => {
 
     const cursor = products
       .find({ $or: [{ product_name: regex }, { generic_name: regex }, { brands: regex }] })
-      .limit(20);
+      .limit(50);
 
     results = (await cursor.toArray()).map(formatProduct);
   }
