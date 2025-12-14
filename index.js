@@ -1,17 +1,13 @@
 import express from "express";
+import fetch from "node-fetch";
 import { MongoClient } from "mongodb";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-const uri = process.env.MONGO_URI;
-const client = new MongoClient(uri);
-
-await client.connect();
-const db = client.db("off_db");
-const products = db.collection("products");
-
 const app = express();
+const PORT = 3000;
+
 app.use(express.json());
 
 app.use((req, res, next) => {
@@ -22,13 +18,16 @@ app.use((req, res, next) => {
   next();
 });
 
+const uri = process.env.MONGO_URI;
+const client = new MongoClient(uri);
+await client.connect();
+const db = client.db("off_db");
+const products = db.collection("products");
 
-// Barcode herkenning
 function isBarcode(str) {
   return /^[0-9]{8,14}$/.test(str);
 }
 
-// Product formatter
 function formatProduct(p) {
   if (!p) return null;
   const n = p.nutriments || {};
@@ -70,7 +69,64 @@ function formatProduct(p) {
   };
 }
 
-// Unified endpoint
+let accessToken = null;
+let tokenExpiresAt = 0;
+
+async function getAccessToken() {
+  if (accessToken && Date.now() < tokenExpiresAt) {
+    return accessToken;
+  }
+
+  const credentials = Buffer.from(
+    `${process.env.CLIENT_ID}:${process.env.CLIENT_SECRET}`
+  ).toString("base64");
+
+  const response = await fetch("https://oauth.fatsecret.com/connect/token", {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${credentials}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: "grant_type=client_credentials&scope=premier",
+  });
+
+  const data = await response.json();
+
+  if (!data.access_token) {
+    throw new Error(`Kon geen token ophalen: ${JSON.stringify(data)}`);
+  }
+
+  accessToken = data.access_token;
+  tokenExpiresAt = Date.now() + data.expires_in * 1000;
+  return accessToken;
+}
+
+
+app.get("/search", async (req, res) => {
+  try {
+    const token = await getAccessToken();
+    const { q, page = 0, max = 20 } = req.query;
+
+    if (!q) return res.status(400).json({ error: "q ontbreekt" });
+
+    const url = new URL("https://platform.fatsecret.com/rest/foods/search/v4");
+    url.searchParams.append("search_expression", q);
+    url.searchParams.append("page_number", page);
+    url.searchParams.append("max_results", Math.min(max, 50));
+    url.searchParams.append("format", "json");
+
+    const response = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "FatSecret request failed" });
+  }
+});
+
 app.get("/product", async (req, res) => {
   const query = req.query.q;
   if (!query) return res.status(400).json({ error: "q ontbreekt" });
@@ -91,9 +147,9 @@ app.get("/product", async (req, res) => {
     results = (await cursor.toArray()).map(formatProduct);
   }
 
-  // Wrap in foods.food zodat Flutter werkt
   res.json({ foods: { food: results } });
 });
 
-
-app.listen(3000, "0.0.0.0", () => console.log("🚀 Server running on port 3000"));
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
