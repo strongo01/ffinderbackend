@@ -41,11 +41,18 @@ function formatProduct(p) {
     p.image_small_url ||
     null;
 
+  const servingSize =
+    p.serving_size ||
+    p.serving_size_with_unit ||
+    p.serving_quantity ||
+    null;
+
   return {
     barcode: p.code || null,
     product_name: p.product_name || null,
     brands: p.brands || p.brand || null,
     nutriscore: p.nutriscore_grade || null,
+    serving_size: servingSize,
     nutriments: {
       energy_kcal: n["energy-kcal_100g"] ?? null,
       fat: n.fat_100g ?? null,
