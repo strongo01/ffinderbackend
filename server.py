@@ -17,13 +17,43 @@ manipulated_recipes_data = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global recipes_df, tfidf_matrix, raw_json_data, manipulated_recipes_data
-    
-    # Load manipulated_recipes_3.json for general operations (search, get_recipe_by_id)
-    with open("manipulated_recipes_3.json", "r") as f:
-        manipulated_recipes_data = json.load(f)
-    
-    # Load recipes_for_cbrs.json for recommendations
-    with open("recipes_for_cbrs.json", "r") as f:
+
+    # Ensure ratings table exists
+    with sqlite3.connect("ratings.db") as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS ratings ("
+                     "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                     "user_id TEXT NOT NULL,"
+                     "recipe_id INTEGER NOT NULL,"
+                     "rating REAL NOT NULL)")
+
+        # Create recipes table to store manipulated recipes if it doesn't exist
+        conn.execute("CREATE TABLE IF NOT EXISTS recipes (id INTEGER PRIMARY KEY, title TEXT, data TEXT)")
+
+        # If recipes table is empty, import from the JSON file once
+        cur = conn.execute("SELECT COUNT(1) as cnt FROM recipes")
+        row = cur.fetchone()
+        need_import = (row is None) or (row[0] == 0)
+
+        if need_import:
+            # Stream insert to avoid keeping the whole file in memory
+            with open("manipulated_recipes_3.json", "r", encoding="utf-8") as f:
+                items = json.load(f)
+                to_insert = []
+                for r in items:
+                    rid = r.get("id")
+                    title = r.get("title", "")
+                    data_text = json.dumps(r, ensure_ascii=False)
+                    to_insert.append((rid, title, data_text))
+                    if len(to_insert) >= 500:
+                        conn.executemany("INSERT OR REPLACE INTO recipes (id, title, data) VALUES (?, ?, ?)", to_insert)
+                        conn.commit()
+                        to_insert = []
+                if to_insert:
+                    conn.executemany("INSERT OR REPLACE INTO recipes (id, title, data) VALUES (?, ?, ?)", to_insert)
+                    conn.commit()
+
+    # Load recipes_for_cbrs.json for recommendations (kept in memory for TF-IDF)
+    with open("recipes_for_cbrs.json", "r", encoding="utf-8") as f:
         raw_json_data = json.load(f)
 
     flattened_data = []
@@ -37,18 +67,14 @@ async def lifespan(app: FastAPI):
     recipes_df = pd.DataFrame(flattened_data)
     exploded = recipes_df.explode("content")
     binary_matrix = pd.crosstab(exploded["id"], exploded["content"])
-    
+
     total_recipes = len(recipes_df)
     item_counts = (binary_matrix > 0).sum(axis=0)
     idf = np.log(total_recipes / (item_counts + 1))
     tfidf_matrix = binary_matrix * idf
-    
-    with sqlite3.connect("ratings.db") as conn:
-        conn.execute("CREATE TABLE IF NOT EXISTS ratings ("
-                  "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-                  "user_id TEXT NOT NULL,"
-                  "recipe_id INTEGER NOT NULL,"
-                  "rating REAL NOT NULL)")
+
+    # Avoid keeping manipulated_recipes in memory
+    manipulated_recipes_data = None
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -60,24 +86,34 @@ class Rating(BaseModel):
 
 @app.get("/recipes/search")
 async def search_recipes(query: str):
+    with sqlite3.connect("ratings.db") as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.execute("SELECT id, title FROM recipes WHERE title LIKE ? COLLATE NOCASE LIMIT 100", (f"%{query}%",))
+        rows = cur.fetchall()
+
     results = []
-    for recipe in manipulated_recipes_data:
-        if query.lower() in recipe['title'].lower():
-            results.append({
-                'id': recipe['id'],
-                'title': recipe['title'],
-                'image_link': f"https://placehold.co/600x400?text={recipe['title'].replace(' ', '+')}"
-            })
+    for row in rows:
+        title = row["title"] or ""
+        results.append({
+            'id': row['id'],
+            'title': title,
+            'image_link': f"https://placehold.co/600x400?text={title.replace(' ', '+')}"
+        })
     return results
 
 @app.get("/recipes/{recipe_id}")
 async def get_recipe_by_id(recipe_id: int):
-    recipe = next((r for r in manipulated_recipes_data if r["id"] == recipe_id), None)
-    if not recipe:
+    with sqlite3.connect("ratings.db") as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT data FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
+
+    if not row:
         raise HTTPException(status_code=404, detail="Recipe not found")
-    # Add image_link to the recipe
+
+    recipe = json.loads(row['data'])
     recipe_with_image = dict(recipe)
-    recipe_with_image['image_link'] = f"https://placehold.co/600x400?text={recipe['title'].replace(' ', '+')}"
+    title = recipe.get('title', '')
+    recipe_with_image['image_link'] = f"https://placehold.co/600x400?text={title.replace(' ', '+')}"
     return recipe_with_image
 
 @app.post("/recipes/rate")
@@ -109,14 +145,17 @@ async def get_recommendations(user_id: str, limit: int = 5):
         selected.extend(random_selections)
         
         results = []
-        for recipe_id in selected:
-            recipe = next((r for r in manipulated_recipes_data if r["id"] == recipe_id), None)
-            if recipe:
-                results.append({
-                    'id': recipe['id'],
-                    'title': recipe['title'],
-                    'image_link': f"https://placehold.co/600x400?text={recipe['title'].replace(' ', '+')}"
-                })
+        with sqlite3.connect("ratings.db") as conn:
+            conn.row_factory = sqlite3.Row
+            for recipe_id in selected:
+                row = conn.execute("SELECT id, title FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
+                if row:
+                    title = row['title'] or ''
+                    results.append({
+                        'id': row['id'],
+                        'title': title,
+                        'image_link': f"https://placehold.co/600x400?text={title.replace(' ', '+')}"
+                    })
         return results
 
     user_ratings_series = pd.Series({row["recipe_id"]: row["rating"] for row in rows})
@@ -155,13 +194,17 @@ async def get_recommendations(user_id: str, limit: int = 5):
     final_results = pd.concat([recommendation_items, popular_items, random_items])[['id', 'title']]
     
     results_list = []
-    for idx, row in final_results.iterrows():
-        recipe = next((r for r in manipulated_recipes_data if r["id"] == row['id']), None)
-        if recipe:
-            results_list.append({
-                'id': recipe['id'],
-                'title': recipe['title'],
-                'image_link': f"https://placehold.co/600x400?text={recipe['title'].replace(' ', '+')}"
-            })
+    with sqlite3.connect("ratings.db") as conn:
+        conn.row_factory = sqlite3.Row
+        for idx, row in final_results.iterrows():
+            rid = row['id'] if 'id' in row else idx
+            db_row = conn.execute("SELECT id, title FROM recipes WHERE id = ?", (rid,)).fetchone()
+            if db_row:
+                title = db_row['title'] or ''
+                results_list.append({
+                    'id': db_row['id'],
+                    'title': title,
+                    'image_link': f"https://placehold.co/600x400?text={title.replace(' ', '+')}"
+                })
     
     return results_list
