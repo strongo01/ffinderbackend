@@ -150,6 +150,80 @@ app.get("/product", async (req, res) => {
   res.json({ foods: { food: results } });
 });
 
+const PYTHON_SERVER_URL = process.env.PYTHON_SERVER_URL;
+
+app.get("/recipes/search", async (req, res) => {
+  try {
+    const { query } = req.query;
+    if (!query) return res.status(400).json({ error: "query ontbreekt" });
+
+    const response = await fetch(`${PYTHON_SERVER_URL}/recipes/search?query=${encodeURIComponent(query)}`);
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Recipe search failed" });
+  }
+});
+
+app.get("/recipes/:recipeId", async (req, res) => {
+  try {
+    const { recipeId } = req.params;
+    const response = await fetch(`${PYTHON_SERVER_URL}/recipes/${recipeId}`);
+    
+    if (!response.ok) {
+      return res.status(response.status).json({ error: "Recipe not found" });
+    }
+    
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch recipe" });
+  }
+});
+
+app.post("/recipes/rate", async (req, res) => {
+  try {
+    const { user_id, recipe_id, rating } = req.body;
+
+    if (!user_id || !recipe_id || rating === undefined) {
+      return res.status(400).json({ error: "user_id, recipe_id, and rating are required" });
+    }
+
+    const response = await fetch(`${PYTHON_SERVER_URL}/recipes/rate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id, recipe_id, rating }),
+    });
+
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to rate recipe" });
+  }
+});
+
+app.get("/recipes/recommendations/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { limit = 5 } = req.query;
+
+    const response = await fetch(`${PYTHON_SERVER_URL}/recipes/get_recommendations/${userId}?limit=${limit}`);
+    
+    if (!response.ok) {
+      return res.status(response.status).json({ error: "Failed to get recommendations" });
+    }
+
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch recommendations" });
+  }
+});
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
