@@ -7,6 +7,7 @@ from fastapi import FastAPI, Body, HTTPException
 from typing import Any, List, Optional
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
+import random
 
 recipes_df = None
 tfidf_matrix = None
@@ -75,11 +76,27 @@ async def get_recommendations(user_id: str, limit: int = 5):
     with sqlite3.connect("ratings.db") as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute("SELECT recipe_id, rating FROM ratings WHERE user_id = ?", (user_id,)).fetchall()
+        all_ratings = conn.execute("SELECT recipe_id, COUNT(*) as count FROM ratings GROUP BY recipe_id").fetchall()
+    
+    recipe_popularity = {row["recipe_id"]: row["count"] for row in all_ratings}
     
     if not rows:
-        raise HTTPException(status_code=404, detail="No ratings found for this user. Rate some recipes first!")
+        all_recipes = recipes_df['id'].tolist()
+        popular_recipes = sorted(all_recipes, key=lambda x: recipe_popularity.get(x, 0), reverse=True)
+        
+        num_popular = max(1, int(limit * 0.8))
+        num_random = limit - num_popular
+        
+        selected = popular_recipes[:num_popular]
+        remaining = [r for r in all_recipes if r not in selected]
+        random_selections = random.sample(remaining, min(num_random, len(remaining)))
+        selected.extend(random_selections)
+        
+        results = recipes_df[recipes_df['id'].isin(selected)][['id', 'title']].copy()
+        return results.to_dict(orient="records")
 
     user_ratings_series = pd.Series({row["recipe_id"]: row["rating"] for row in rows})
+    rated_recipe_ids = set(user_ratings_series.index)
     
     valid_ids = user_ratings_series.index.intersection(tfidf_matrix.index)
     if valid_ids.empty:
@@ -90,10 +107,27 @@ async def get_recommendations(user_id: str, limit: int = 5):
     
     scores = (tfidf_matrix.dot(user_profile) / user_profile.sum())
     
-    results = recipes_df[['id', 'title']].set_index('id')
+    results = recipes_df[['id', 'title']].set_index('id').copy()
     results['score'] = scores
+    results['popularity'] = results.index.map(lambda x: recipe_popularity.get(x, 0))
     
-    recommendations = results.drop(index=valid_ids)
-    top_items = recommendations.sort_values(by="score", ascending=False).head(limit)
+    unrated = results[~results.index.isin(rated_recipe_ids)].copy()
     
-    return top_items.reset_index().to_dict(orient="records")
+    num_recommendations = max(1, int(limit * 0.8))
+    num_popular = max(0, int(limit * 0.15))
+    num_random = limit - num_recommendations - num_popular
+    
+    recommendation_items = unrated.nlargest(num_recommendations, 'score')
+    remaining = unrated[~unrated.index.isin(recommendation_items.index)]
+    
+    popular_items = remaining.nlargest(num_popular, 'popularity')
+    remaining = remaining[~remaining.index.isin(popular_items.index)]
+    
+    if num_random > 0 and len(remaining) > 0:
+        random_items = remaining.sample(n=min(num_random, len(remaining)))
+    else:
+        random_items = pd.DataFrame()
+    
+    final_results = pd.concat([recommendation_items, popular_items, random_items])[['id', 'title']]
+    
+    return final_results.reset_index(drop=True).to_dict(orient="records")
