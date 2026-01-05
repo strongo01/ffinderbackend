@@ -11,12 +11,18 @@ import random
 
 recipes_df = None
 tfidf_matrix = None
-raw_json_data = None  
+raw_json_data = None
+manipulated_recipes_data = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global recipes_df, tfidf_matrix, raw_json_data
+    global recipes_df, tfidf_matrix, raw_json_data, manipulated_recipes_data
     
+    # Load manipulated_recipes_3.json for general operations (search, get_recipe_by_id)
+    with open("manipulated_recipes_3.json", "r") as f:
+        manipulated_recipes_data = json.load(f)
+    
+    # Load recipes_for_cbrs.json for recommendations
     with open("recipes_for_cbrs.json", "r") as f:
         raw_json_data = json.load(f)
 
@@ -54,15 +60,25 @@ class Rating(BaseModel):
 
 @app.get("/recipes/search")
 async def search_recipes(query: str):
-    results = recipes_df[recipes_df['title'].str.contains(query, case=False, na=False)]
-    return results[['id', 'title']].to_dict(orient="records")
+    results = []
+    for recipe in manipulated_recipes_data:
+        if query.lower() in recipe['title'].lower():
+            results.append({
+                'id': recipe['id'],
+                'title': recipe['title'],
+                'image_link': f"https://placehold.co/600x400?text={recipe['title'].replace(' ', '+')}"
+            })
+    return results
 
 @app.get("/recipes/{recipe_id}")
 async def get_recipe_by_id(recipe_id: int):
-    recipe = next((r for r in raw_json_data if r["id"] == recipe_id), None)
+    recipe = next((r for r in manipulated_recipes_data if r["id"] == recipe_id), None)
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
-    return recipe
+    # Add image_link to the recipe
+    recipe_with_image = dict(recipe)
+    recipe_with_image['image_link'] = f"https://placehold.co/600x400?text={recipe['title'].replace(' ', '+')}"
+    return recipe_with_image
 
 @app.post("/recipes/rate")
 async def rate_recipe(rating: Rating):
@@ -92,8 +108,16 @@ async def get_recommendations(user_id: str, limit: int = 5):
         random_selections = random.sample(remaining, min(num_random, len(remaining)))
         selected.extend(random_selections)
         
-        results = recipes_df[recipes_df['id'].isin(selected)][['id', 'title']].copy()
-        return results.to_dict(orient="records")
+        results = []
+        for recipe_id in selected:
+            recipe = next((r for r in manipulated_recipes_data if r["id"] == recipe_id), None)
+            if recipe:
+                results.append({
+                    'id': recipe['id'],
+                    'title': recipe['title'],
+                    'image_link': f"https://placehold.co/600x400?text={recipe['title'].replace(' ', '+')}"
+                })
+        return results
 
     user_ratings_series = pd.Series({row["recipe_id"]: row["rating"] for row in rows})
     rated_recipe_ids = set(user_ratings_series.index)
@@ -130,4 +154,14 @@ async def get_recommendations(user_id: str, limit: int = 5):
     
     final_results = pd.concat([recommendation_items, popular_items, random_items])[['id', 'title']]
     
-    return final_results.reset_index(drop=True).to_dict(orient="records")
+    results_list = []
+    for idx, row in final_results.iterrows():
+        recipe = next((r for r in manipulated_recipes_data if r["id"] == row['id']), None)
+        if recipe:
+            results_list.append({
+                'id': recipe['id'],
+                'title': recipe['title'],
+                'image_link': f"https://placehold.co/600x400?text={recipe['title'].replace(' ', '+')}"
+            })
+    
+    return results_list
