@@ -162,8 +162,32 @@ async def get_recommendations(user_id: str, limit: int = 5):
     rated_recipe_ids = set(user_ratings_series.index)
     
     valid_ids = user_ratings_series.index.intersection(tfidf_matrix.index)
+    # If no valid rated recipes exist in the CBRS dataset, fall back to popularity-based recommendations
     if valid_ids.empty:
-        raise HTTPException(status_code=404, detail="Rated recipes not found in current dataset.")
+        all_recipes = recipes_df['id'].tolist()
+        popular_recipes = sorted(all_recipes, key=lambda x: recipe_popularity.get(x, 0), reverse=True)
+        
+        num_popular = max(1, int(limit * 0.8))
+        num_random = limit - num_popular
+        
+        selected = popular_recipes[:num_popular]
+        remaining = [r for r in all_recipes if r not in selected]
+        random_selections = random.sample(remaining, min(num_random, len(remaining)))
+        selected.extend(random_selections)
+        
+        results = []
+        with sqlite3.connect("ratings.db") as conn:
+            conn.row_factory = sqlite3.Row
+            for recipe_id in selected:
+                row = conn.execute("SELECT id, title FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
+                if row:
+                    title = row['title'] or ''
+                    results.append({
+                        'id': row['id'],
+                        'title': title,
+                        'image_link': f"https://placehold.co/600x400?text={title.replace(' ', '+')}"
+                    })
+        return results
         
     user_features_matrix = tfidf_matrix.loc[valid_ids]
     user_profile = user_features_matrix.T.dot(user_ratings_series.loc[valid_ids])
