@@ -69,64 +69,6 @@ function formatProduct(p) {
   };
 }
 
-let accessToken = null;
-let tokenExpiresAt = 0;
-
-async function getAccessToken() {
-  if (accessToken && Date.now() < tokenExpiresAt) {
-    return accessToken;
-  }
-
-  const credentials = Buffer.from(
-    `${process.env.CLIENT_ID}:${process.env.CLIENT_SECRET}`
-  ).toString("base64");
-
-  const response = await fetch("https://oauth.fatsecret.com/connect/token", {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${credentials}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials&scope=premier",
-  });
-
-  const data = await response.json();
-
-  if (!data.access_token) {
-    throw new Error(`Kon geen token ophalen: ${JSON.stringify(data)}`);
-  }
-
-  accessToken = data.access_token;
-  tokenExpiresAt = Date.now() + data.expires_in * 1000;
-  return accessToken;
-}
-
-
-app.get("/search", async (req, res) => {
-  try {
-    const token = await getAccessToken();
-    const { q, page = 0, max = 20 } = req.query;
-
-    if (!q) return res.status(400).json({ error: "q ontbreekt" });
-
-    const url = new URL("https://platform.fatsecret.com/rest/foods/search/v4");
-    url.searchParams.append("search_expression", q);
-    url.searchParams.append("page_number", page);
-    url.searchParams.append("max_results", Math.min(max, 50));
-    url.searchParams.append("format", "json");
-
-    const response = await fetch(url.toString(), {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    const data = await response.json();
-    res.json(data);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "FatSecret request failed" });
-  }
-});
-
 app.get("/product", async (req, res) => {
   const query = req.query.q;
   if (!query) return res.status(400).json({ error: "q ontbreekt" });
