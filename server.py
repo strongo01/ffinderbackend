@@ -148,14 +148,16 @@ async def get_recommendations(user_id: str, limit: int = 5):
         with sqlite3.connect("ratings.db") as conn:
             conn.row_factory = sqlite3.Row
             for recipe_id in selected:
-                row = conn.execute("SELECT id, title FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
-                if row:
-                    title = row['title'] or ''
-                    results.append({
-                        'id': row['id'],
-                        'title': title,
-                        'image_link': f"https://placehold.co/600x400?text={title.replace(' ', '+')}"
-                    })
+                row = conn.execute("SELECT data FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
+                if row and row['data']:
+                    try:
+                        recipe = json.loads(row['data'])
+                    except Exception:
+                        recipe = {"id": recipe_id}
+                    title = recipe.get('title', '')
+                    recipe_with_image = dict(recipe)
+                    recipe_with_image['image_link'] = f"https://placehold.co/600x400?text={title.replace(' ', '+')}"
+                    results.append(recipe_with_image)
         return results
 
     user_ratings_series = pd.Series({row["recipe_id"]: row["rating"] for row in rows})
@@ -179,14 +181,16 @@ async def get_recommendations(user_id: str, limit: int = 5):
         with sqlite3.connect("ratings.db") as conn:
             conn.row_factory = sqlite3.Row
             for recipe_id in selected:
-                row = conn.execute("SELECT id, title FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
-                if row:
-                    title = row['title'] or ''
-                    results.append({
-                        'id': row['id'],
-                        'title': title,
-                        'image_link': f"https://placehold.co/600x400?text={title.replace(' ', '+')}"
-                    })
+                row = conn.execute("SELECT data FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
+                if row and row['data']:
+                    try:
+                        recipe = json.loads(row['data'])
+                    except Exception:
+                        recipe = {"id": recipe_id}
+                    title = recipe.get('title', '')
+                    recipe_with_image = dict(recipe)
+                    recipe_with_image['image_link'] = f"https://placehold.co/600x400?text={title.replace(' ', '+')}"
+                    results.append(recipe_with_image)
         return results
         
     user_features_matrix = tfidf_matrix.loc[valid_ids]
@@ -204,6 +208,27 @@ async def get_recommendations(user_id: str, limit: int = 5):
     num_popular = max(0, int(limit * 0.15))
     num_random = limit - num_recommendations - num_popular
     
+    if len(unrated) == 0:
+        all_recipes = recipes_df['id'].tolist()
+        popular_recipes = sorted(all_recipes, key=lambda x: recipe_popularity.get(x, 0), reverse=True)
+        selected = popular_recipes[:limit]
+        
+        results_list = []
+        with sqlite3.connect("ratings.db") as conn:
+            conn.row_factory = sqlite3.Row
+            for recipe_id in selected:
+                row = conn.execute("SELECT data FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
+                if row and row['data']:
+                    try:
+                        recipe = json.loads(row['data'])
+                    except Exception:
+                        recipe = {"id": recipe_id}
+                    title = recipe.get('title', '')
+                    recipe_with_image = dict(recipe)
+                    recipe_with_image['image_link'] = f"https://placehold.co/600x400?text={title.replace(' ', '+')}"
+                    results_list.append(recipe_with_image)
+        return results_list
+    
     recommendation_items = unrated.nlargest(num_recommendations, 'score')
     remaining = unrated[~unrated.index.isin(recommendation_items.index)]
     
@@ -215,20 +240,28 @@ async def get_recommendations(user_id: str, limit: int = 5):
     else:
         random_items = pd.DataFrame()
     
-    final_results = pd.concat([recommendation_items, popular_items, random_items])[['id', 'title']]
+    candidates = pd.concat([recommendation_items, popular_items, random_items])
+    if len(candidates) < limit and len(unrated) > len(candidates):
+        already_selected = set(candidates.index)
+        unfilled = unrated[~unrated.index.isin(already_selected)].nlargest(limit - len(candidates), 'popularity')
+        candidates = pd.concat([candidates, unfilled])
+    
+    final_results = candidates[['id', 'title']].head(limit)
     
     results_list = []
     with sqlite3.connect("ratings.db") as conn:
         conn.row_factory = sqlite3.Row
         for idx, row in final_results.iterrows():
             rid = row['id'] if 'id' in row else idx
-            db_row = conn.execute("SELECT id, title FROM recipes WHERE id = ?", (rid,)).fetchone()
-            if db_row:
-                title = db_row['title'] or ''
-                results_list.append({
-                    'id': db_row['id'],
-                    'title': title,
-                    'image_link': f"https://placehold.co/600x400?text={title.replace(' ', '+')}"
-                })
+            db_row = conn.execute("SELECT data FROM recipes WHERE id = ?", (rid,)).fetchone()
+            if db_row and db_row['data']:
+                try:
+                    recipe = json.loads(db_row['data'])
+                except Exception:
+                    recipe = {"id": rid}
+                title = recipe.get('title', '')
+                recipe_with_image = dict(recipe)
+                recipe_with_image['image_link'] = f"https://placehold.co/600x400?text={title.replace(' ', '+')}"
+                results_list.append(recipe_with_image)
     
     return results_list
