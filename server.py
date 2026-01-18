@@ -3,16 +3,30 @@ import json
 import sqlite3
 import pandas as pd
 import numpy as np
-from fastapi import FastAPI, Body, HTTPException
+from fastapi import FastAPI, Body, HTTPException, Request
 from typing import Any, List, Optional
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 import random
+import logging 
+import time
 
 recipes_df = None
 tfidf_matrix = None
 raw_json_data = None
 manipulated_recipes_data = None
+
+os.makedirs("logs", exist_ok=True)
+logger = logging.getLogger("request")
+file_handler = logging.FileHandler("logs/app.log")
+formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s")
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+logger.setLevel(logging.INFO)
+logger.propagate = False
+
+
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -78,6 +92,25 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(lifespan=lifespan)
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+    try:
+        response = await call_next(request)
+    except Exception as e:
+        logger.exception(f"Unhandled error: {e}")
+        raise
+    process_time = time.time() - start_time
+
+    logger.info(
+        "%s %s - %s - %.3fs",
+        request.method,
+        request.url.path,
+        response.status_code,
+        process_time,
+    )
+    return response
 
 class Rating(BaseModel):
     user_id: str
