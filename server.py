@@ -279,7 +279,7 @@ async def get_recommendations(user_id: str, limit: int = 5):
         unfilled = unrated[~unrated.index.isin(already_selected)].nlargest(limit - len(candidates), 'popularity')
         candidates = pd.concat([candidates, unfilled])
     
-    final_results = candidates[['id', 'title']].head(limit)
+    final_results = candidates.reset_index()[['id', 'title']].head(limit)
     
     results_list = []
     with sqlite3.connect("ratings.db") as conn:
