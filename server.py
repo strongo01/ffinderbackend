@@ -118,27 +118,71 @@ class Rating(BaseModel):
     rating: float
 
 @app.get("/recipes/search")
-async def search_recipes(query: str):
+async def search_recipes(
+    query: Optional[str] = None,
+    kitchen: Optional[str] = None,
+    course: Optional[str] = None,
+    difficulty: Optional[str] = None,
+    max_prep: Optional[int] = None,
+    max_kcal: Optional[int] = None,
+    min_protein: Optional[int] = None,
+    tag: Optional[str] = None
+):
     with sqlite3.connect("ratings.db") as conn:
         conn.row_factory = sqlite3.Row
-        cur.execute("""
-            SELECT id, title FROM recipes 
-            WHERE title LIKE ? 
-            OR title LIKE ? 
-            OR title LIKE ? 
-            OR title = ?
-            COLLATE NOCASE LIMIT 100
-        """, (f"{query} %", f"% {query}", f"% {query} %", query))
+        cur = conn.cursor()
+
+        sql = "SELECT id, title FROM recipes WHERE 1=1"
+        params = []
+
+        if query:
+            sql += " AND (title LIKE ? OR title LIKE ? OR title LIKE ? OR title = ?)"
+            params.extend([f"{query} %", f"% {query}", f"% {query} %", query])
+
+        if kitchen:
+            sql += " AND json_extract(data, '$.kitchens[0].name') = ?"
+            params.append(kitchen)
+        
+        if course:
+            sql += " AND json_extract(data, '$.courses[0].main') = ?"
+            params.append(course)
+
+        if difficulty:
+            sql += " AND json_extract(data, '$.difficulty.name') = ?"
+            params.append(difficulty)
+
+        if max_prep:
+            sql += " AND CAST(json_extract(data, '$.preparation_time') AS INTEGER) <= ?"
+            params.append(max_prep)
+
+        if max_kcal:
+            sql += " AND CAST(json_extract(data, '$.kcal') AS INTEGER) <= ?"
+            params.append(max_kcal)
+
+        if min_protein:
+            sql += " AND CAST(json_extract(data, '$.protein') AS INTEGER) >= ?"
+            params.append(min_protein)
+
+        if tag:
+            sql += " AND data LIKE ?"
+            params.append(f'%"{tag}"%')
+
+        sql += " COLLATE NOCASE LIMIT 100"
+        
+        cur.execute(sql, params)
         rows = cur.fetchall()
 
     results = []
     for row in rows:
-        title = row["title"] or ""
+        original_title = row["title"] or ""
+        url_title = original_title.replace(" ", "-")
+        
         results.append({
             'id': row['id'],
-            'title': title,
-            'image_link': f"https://placehold.co/600x400?text={title.replace(' ', '+')}"
+            'title': original_title,
+            'image_link': f"https://boodschappen.nl/app/uploads/recipe_images/4by3_header@2x/{url_title.lower()}.jpg"
         })
+
     return results
 
 @app.get("/recipes/{recipe_id}")
@@ -305,3 +349,22 @@ async def get_recommendations(user_id: str, limit: int = 5):
                 results_list.append(recipe_with_image)
     
     return results_list
+
+@app.get("/recipes/filters")
+async def get_filters():
+    with sqlite3.connect("ratings.db") as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        
+        kitchens = cur.execute("SELECT DISTINCT name FROM kitchens").fetchall()
+        courses = cur.execute("SELECT DISTINCT main FROM courses").fetchall()
+        tags = cur.execute("SELECT DISTINCT sub FROM tags WHERE sub IS NOT NULL").fetchall()
+        
+    return {
+        "kitchens": [k["name"] for k in kitchens],
+        "courses": [c["main"] for c in courses],
+        "tags": [t["sub"] for t in tags],
+        "difficulties": ["makkelijk", "gemiddeld", "moeilijk"],
+        "max_kcal": 1500,
+        "max_prep_time": 120
+    }
