@@ -121,7 +121,14 @@ class Rating(BaseModel):
 async def search_recipes(query: str):
     with sqlite3.connect("ratings.db") as conn:
         conn.row_factory = sqlite3.Row
-        cur = conn.execute("SELECT id, title FROM recipes WHERE title LIKE ? COLLATE NOCASE LIMIT 100", (f"%{query}%",))
+        cur.execute("""
+            SELECT id, title FROM recipes 
+            WHERE title LIKE ? 
+            OR title LIKE ? 
+            OR title LIKE ? 
+            OR title = ?
+            COLLATE NOCASE LIMIT 100
+        """, (f"{query} %", f"% {query}", f"% {query} %", query))
         rows = cur.fetchall()
 
     results = []
