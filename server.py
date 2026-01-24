@@ -199,7 +199,7 @@ async def get_filters():
         "kitchens": [k["name"] for k in kitchens],
         "courses": [c["main"] for c in courses],
         "tags": [t["sub"] for t in tags],
-        "difficulties": ["makkelijk", "gemiddeld", "moeilijk"],
+        "difficulties": ["eenvoudig", "gemiddeld", "uitdagend"],
         "max_kcal": 1500,
         "max_prep_time": 120
     }
