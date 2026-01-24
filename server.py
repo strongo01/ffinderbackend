@@ -185,7 +185,26 @@ async def search_recipes(
 
     return results
 
-@app.get("/recipes/{recipe_id}")
+@app.get("/recipes/filters")
+async def get_filters():
+    with sqlite3.connect("ratings.db") as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        
+        kitchens = cur.execute("SELECT DISTINCT name FROM kitchens").fetchall()
+        courses = cur.execute("SELECT DISTINCT main FROM courses").fetchall()
+        tags = cur.execute("SELECT DISTINCT sub FROM tags WHERE sub IS NOT NULL").fetchall()
+        
+    return {
+        "kitchens": [k["name"] for k in kitchens],
+        "courses": [c["main"] for c in courses],
+        "tags": [t["sub"] for t in tags],
+        "difficulties": ["makkelijk", "gemiddeld", "moeilijk"],
+        "max_kcal": 1500,
+        "max_prep_time": 120
+    }
+
+@app.get("/recipes/get/{recipe_id}")
 async def get_recipe_by_id(recipe_id: int):
     with sqlite3.connect("ratings.db") as conn:
         conn.row_factory = sqlite3.Row
@@ -349,22 +368,3 @@ async def get_recommendations(user_id: str, limit: int = 5):
                 results_list.append(recipe_with_image)
     
     return results_list
-
-@app.get("/recipes/filters")
-async def get_filters():
-    with sqlite3.connect("ratings.db") as conn:
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        
-        kitchens = cur.execute("SELECT DISTINCT name FROM kitchens").fetchall()
-        courses = cur.execute("SELECT DISTINCT main FROM courses").fetchall()
-        tags = cur.execute("SELECT DISTINCT sub FROM tags WHERE sub IS NOT NULL").fetchall()
-        
-    return {
-        "kitchens": [k["name"] for k in kitchens],
-        "courses": [c["main"] for c in courses],
-        "tags": [t["sub"] for t in tags],
-        "difficulties": ["makkelijk", "gemiddeld", "moeilijk"],
-        "max_kcal": 1500,
-        "max_prep_time": 120
-    }

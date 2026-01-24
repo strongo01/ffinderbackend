@@ -118,10 +118,10 @@ app.get("/recipes/search", async (req, res) => {
   }
 });
 
-app.get("/recipes/:recipeId", async (req, res) => {
+app.get("/recipes/get/:recipeId", async (req, res) => {
   try {
     const { recipeId } = req.params;
-    const response = await fetch(`${PYTHON_SERVER_URL}/recipes/${recipeId}`);
+    const response = await fetch(`${PYTHON_SERVER_URL}/recipes/get/${recipeId}`);
     if (!response.ok) return res.status(response.status).json({ error: "Recipe not found" });
     const data = await response.json();
     res.json(data);
