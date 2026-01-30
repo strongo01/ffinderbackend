@@ -187,22 +187,41 @@ async def search_recipes(
 
 @app.get("/recipes/filters")
 async def get_filters():
+    kitchens = set()
+    courses = set()
+    tags = set()
+
     with sqlite3.connect("ratings.db") as conn:
         conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        
-        kitchens = cur.execute("SELECT DISTINCT name FROM kitchens").fetchall()
-        courses = cur.execute("SELECT DISTINCT main FROM courses").fetchall()
-        tags = cur.execute("SELECT DISTINCT sub FROM tags WHERE sub IS NOT NULL").fetchall()
-        
+        rows = conn.execute("SELECT data FROM recipes").fetchall()
+
+    for row in rows:
+        try:
+            recipe = json.loads(row["data"])
+        except Exception:
+            continue
+
+        for k in recipe.get("kitchens", []):
+            if k.get("name"):
+                kitchens.add(k["name"])
+
+        for c in recipe.get("courses", []):
+            if c.get("main"):
+                courses.add(c["main"])
+
+        for t in recipe.get("tags", []):
+            if t.get("sub"):
+                tags.add(t["sub"])
+
     return {
-        "kitchens": [k["name"] for k in kitchens],
-        "courses": [c["main"] for c in courses],
-        "tags": [t["sub"] for t in tags],
+        "kitchens": sorted(kitchens),
+        "courses": sorted(courses),
+        "tags": sorted(tags),
         "difficulties": ["eenvoudig", "gemiddeld", "uitdagend"],
         "max_kcal": 1500,
         "max_prep_time": 120
     }
+
 
 @app.get("/recipes/get/{recipe_id}")
 async def get_recipe_by_id(recipe_id: int):
