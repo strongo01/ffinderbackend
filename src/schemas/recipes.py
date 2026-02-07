@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
 
 class RecipeSearch(BaseModel):
     query: str = Field(..., min_length=1, description="Search query")
@@ -12,4 +12,11 @@ class RecipeSearchResult(BaseModel):
     id: int
     title: str
     rank: float
-    
+
+class FiltersResult(BaseModel):
+    kitchens: List[str]
+    courses: List[str]
+    tags: List[str]
+    difficulties: List[str] = ["eenvoudig", "gemiddeld", "uitdagend"]
+    max_kcal: int = 1500
+    max_prep_time: int = 120

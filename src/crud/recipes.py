@@ -1,4 +1,4 @@
-from src.db.models import Recipe
+from src.db.models import Recipe, Kitchen, Tag, Course
 from sqlalchemy.orm import Session
 from sqlalchemy import func, select
 from src.schemas.recipes import RecipeSearchResult, RecipeSearch
@@ -22,3 +22,15 @@ def search_recipes(payload: RecipeSearch, db: Session):
             rank=float(row.rank)
         ) for row in results
     ]
+
+def get_all_kitchens(db: Session):
+    statement = select(Kitchen.name)
+    return db.execute(statement).scalars().all()
+
+def get_all_tags(db: Session):
+    statement = select(Tag.sub)
+    return db.execute(statement).scalars().all()
+
+def get_all_courses(db: Session):
+    statement = select(Course.main)
+    return db.execute(statement).scalars().all()
