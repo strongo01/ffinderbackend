@@ -14,14 +14,8 @@ def search_recipes(payload: RecipeSearch, db: Session):
     .order_by(func.ts_rank(Recipe.search_vector, ts_query).desc())
     .limit(payload.limit)
     .offset(payload.offset))
-    results = db.execute(statement)
-    return [
-        RecipeSearchResult(
-            id=row.id,
-            title=row.title,
-            rank=float(row.rank)
-        ) for row in results
-    ]
+    results = db.execute(statement).all()
+    return results
 
 def get_all_kitchens(db: Session):
     statement = select(Kitchen.name)
