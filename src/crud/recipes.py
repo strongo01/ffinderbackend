@@ -34,3 +34,6 @@ def get_all_tags(db: Session):
 def get_all_courses(db: Session):
     statement = select(Course.main)
     return db.execute(statement).scalars().all()
+
+def get_recipe_by_id(db: Session, id: int):
+    return db.get(Recipe, id)

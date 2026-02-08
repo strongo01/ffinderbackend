@@ -1,0 +1,2 @@
+class RecipeNotFound(Exception):
+    pass
