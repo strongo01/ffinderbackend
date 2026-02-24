@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, Text, Index, ForeignKey, Table, Float, UniqueConstraint
+from sqlalchemy import Column, Integer, Text, Index, ForeignKey, Table, Float, UniqueConstraint, String, DateTime, func
 from src.db.base import Base
 from sqlalchemy.dialects.postgresql import TSVECTOR, JSONB
 from sqlalchemy.orm import relationship
@@ -152,3 +152,25 @@ class Course(Base):
         secondary=recipe_courses,
         back_populates="courses"
     )
+
+# User stuff
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True)
+    firebase_uid = Column(String, unique=True, nullable=False, index=True)
+
+    created_at = Column(DateTime, server_default=func.now())
+
+    interactions = relationship("RecipeInteraction", back_populates="user")
+
+class RecipeInteraction(Base):
+    __tablename__ = "recipe_interactions"
+
+    user_id = Column(ForeignKey("users.id"), primary_key=True)
+    recipe_id = Column(ForeignKey("recipes.id", primary_key=True))
+
+    rating = Column(Float, nullable=True)
+
+    user = relationship("User", back_populates="interactions")

@@ -1,7 +1,7 @@
-from src.db.models import Recipe, Kitchen, Tag, Course
+from src.db.models import Recipe, Kitchen, Tag, Course, RecipeInteraction, User
 from sqlalchemy.orm import Session
 from sqlalchemy import func, select
-from src.schemas.recipes import RecipeSearchResult, RecipeSearch
+from src.schemas.recipes import RecipeSearchResult, RecipeSearch, UserRating
 
 def search_recipes(payload: RecipeSearch, db: Session):
     ts_query = func.plainto_tsquery("english", payload.query)
@@ -31,3 +31,30 @@ def get_all_courses(db: Session):
 
 def get_recipe_by_id(db: Session, id: int):
     return db.get(Recipe, id)
+
+def rate_recipe(user_rating: UserRating, db: Session):
+    interaction = db.get(
+        RecipeInteraction, (user_rating.user_id, user_rating.recipe_id)
+    )
+    if interaction:
+        interaction.rating = user_rating.rating
+    else:
+        interaction = RecipeInteraction(
+            user_id=user_rating.user_id,
+            recipe_id=user_rating.recipe_id,
+            rating=user_rating.rating
+        )
+        db.add(interaction)
+    db.flush()
+
+def get_user_by_firebase_id(firebase_uid: str, db: Session):
+    statement = select(User).where(User.firebase_uid == firebase_uid)
+    return db.execute(statement).scalar_one_or_none()
+
+def create_user(firebase_uid: str, db: Session):
+    obj = User(
+        firebase_uid=firebase_uid
+    )
+    db.add(obj)
+    db.flush()
+    return obj

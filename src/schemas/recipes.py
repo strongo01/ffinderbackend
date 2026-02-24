@@ -97,3 +97,8 @@ class RecipeResponse(BaseModel):
 
     class Config:
         orm_mode = True
+
+class UserRating(BaseModel):
+    user_id: str
+    recipe_id: int
+    rating: float
