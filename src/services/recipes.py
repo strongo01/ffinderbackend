@@ -1,5 +1,5 @@
 from src.crud.recipes import get_all_courses, get_all_kitchens, get_all_tags, search_recipes, get_recipe_by_id, rate_recipe, get_user_by_firebase_id, create_user
-from src.schemas.recipes import FiltersResult, RecipeSearch, RecipeSearchResult, UserRating
+from src.schemas.recipes import FiltersResult, RecipeSearch, RecipeSearchResult, RatingRequest
 from src.db.models import Recipe
 from sqlalchemy.orm import Session
 from src.core.errors import RecipeNotFound
@@ -31,13 +31,8 @@ def get_recipes_service(db: Session, id: int):
         raise RecipeNotFound()
     return results
 
-def rate_recipe_service(db: Session, user_rating: UserRating):
-    user = get_user_by_firebase_id(firebase_uid=user_rating.user_id, db=db)
+def rate_recipe_service(db: Session, payload: RatingRequest):
+    user = get_user_by_firebase_id(firebase_uid=payload.firebase_uid, db=db)
     if not user:
-        user = create_user(firebase_uid=user_rating.user_id, db=db)
-    new_user_rating = UserRating(
-        user_id=user.id,
-        recipe_id=user_rating.recipe_id,
-        rating=user_rating.rating
-    )
-    rate_recipe(new_user_rating, db=db)
+        user = create_user(firebase_uid=payload.firebase_uid, db=db)
+    rate_recipe(user_id=user.id, recipe_id=payload.recipe_id, rating=payload.rating, db=db)

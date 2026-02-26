@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from src.schemas.recipes import RecipeSearch, RecipeSearchResult, FiltersResult, RecipeResponse, UserRating
+from src.schemas.recipes import RecipeSearch, RecipeSearchResult, FiltersResult, RecipeResponse, RatingRequest
 from sqlalchemy.orm import Session
 from src.db.deps import get_db
 from src.services.recipes import search_recipes_service, get_all_filters_service, get_recipes_service, rate_recipe_service
@@ -28,6 +28,6 @@ def id_endpoint(recipe_id: int, db: Session = Depends(get_db)):
         )
 
 @router.post("/rate")
-def rating_endpoint(payload: UserRating, db: Session = Depends(get_db)):
+def rating_endpoint(payload: RatingRequest, db: Session = Depends(get_db)):
     with db.begin():
-        rate_recipe_service(db=db, user_rating=payload)
+        rate_recipe_service(db=db, payload=payload)

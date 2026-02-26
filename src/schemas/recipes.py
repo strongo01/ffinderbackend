@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List
 
 class RecipeSearch(BaseModel):
@@ -31,8 +31,7 @@ class IngredientBase(BaseModel):
     id: int
     name: str
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 class RecipeIngredientBase(BaseModel):
     ingredient: IngredientBase
@@ -41,16 +40,14 @@ class RecipeIngredientBase(BaseModel):
     unit_abbreviation: Optional[str]
     postfix: Optional[str]
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 class TagBase(BaseModel):
     id: int
     main: str
     sub: str
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 class KitchenBase(BaseModel):
     id: int
@@ -58,16 +55,14 @@ class KitchenBase(BaseModel):
     sub: Optional[str]
     name: str
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 class CourseBase(BaseModel):
     id: int
     main: str
     sub: Optional[str]
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 class RecipeResponse(BaseModel):
     id: int
@@ -95,10 +90,9 @@ class RecipeResponse(BaseModel):
     kitchens: List[KitchenBase] = Field(default_factory=list)
     courses: List[CourseBase] = Field(default_factory=list)
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
-class UserRating(BaseModel):
-    user_id: str
+class RatingRequest(BaseModel):
+    firebase_uid: str
     recipe_id: int
     rating: float

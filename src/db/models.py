@@ -169,7 +169,7 @@ class RecipeInteraction(Base):
     __tablename__ = "recipe_interactions"
 
     user_id = Column(ForeignKey("users.id"), primary_key=True)
-    recipe_id = Column(ForeignKey("recipes.id", primary_key=True))
+    recipe_id = Column(ForeignKey("recipes.id"), primary_key=True)
 
     rating = Column(Float, nullable=True)
 

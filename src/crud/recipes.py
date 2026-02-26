@@ -1,7 +1,7 @@
 from src.db.models import Recipe, Kitchen, Tag, Course, RecipeInteraction, User
 from sqlalchemy.orm import Session
 from sqlalchemy import func, select
-from src.schemas.recipes import RecipeSearchResult, RecipeSearch, UserRating
+from src.schemas.recipes import RecipeSearchResult, RecipeSearch, RatingRequest
 
 def search_recipes(payload: RecipeSearch, db: Session):
     ts_query = func.plainto_tsquery("english", payload.query)
@@ -32,17 +32,17 @@ def get_all_courses(db: Session):
 def get_recipe_by_id(db: Session, id: int):
     return db.get(Recipe, id)
 
-def rate_recipe(user_rating: UserRating, db: Session):
+def rate_recipe(user_id: int, recipe_id: int, rating: float, db: Session):
     interaction = db.get(
-        RecipeInteraction, (user_rating.user_id, user_rating.recipe_id)
+        RecipeInteraction, (user_id, recipe_id)
     )
     if interaction:
-        interaction.rating = user_rating.rating
+        interaction.rating = rating
     else:
         interaction = RecipeInteraction(
-            user_id=user_rating.user_id,
-            recipe_id=user_rating.recipe_id,
-            rating=user_rating.rating
+            user_id=user_id,
+            recipe_id=recipe_id,
+            rating=rating
         )
         db.add(interaction)
     db.flush()
