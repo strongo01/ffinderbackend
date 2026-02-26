@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from src.schemas.recipes import RecipeSearch, RecipeSearchResult, FiltersResult, RecipeResponse, UserRatingInput
+from src.schemas.recipes import RecipeSearch, RecipeSearchResult, FiltersResult, RecipeResponse, UserRating
 from sqlalchemy.orm import Session
 from src.db.deps import get_db
 from src.services.recipes import search_recipes_service, get_all_filters_service, get_recipes_service, rate_recipe_service
