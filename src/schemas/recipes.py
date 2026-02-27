@@ -96,3 +96,14 @@ class RatingRequest(BaseModel):
     firebase_uid: str
     recipe_id: int
     rating: float
+
+class RecommendationRecipe(BaseModel):
+    id: int
+    title: str
+    kcal: int | None
+    image_link: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+class RecommnedationResponse(BaseModel):
+    recommendations: list[RecommendationRecipe]

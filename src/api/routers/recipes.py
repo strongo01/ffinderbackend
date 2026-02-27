@@ -1,13 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from src.schemas.recipes import RecipeSearch, RecipeSearchResult, FiltersResult, RecipeResponse, RatingRequest
 from sqlalchemy.orm import Session
 from src.db.deps import get_db
-from src.services.recipes import search_recipes_service, get_all_filters_service, get_recipes_service, rate_recipe_service
+from src.services.recipes import search_recipes_service, get_all_filters_service, get_recipes_service, rate_recipe_service, RecommendationService
 import json
 from sqlalchemy import select, text
 from src.core.errors import RecipeNotFound
 
 router = APIRouter(prefix="/recipes")
+
+service = RecommendationService()
 
 @router.get("/search", response_model=list[RecipeSearchResult])
 def search_endpoint(payload: RecipeSearch, db: Session = Depends(get_db)):
@@ -31,3 +33,7 @@ def id_endpoint(recipe_id: int, db: Session = Depends(get_db)):
 def rating_endpoint(payload: RatingRequest, db: Session = Depends(get_db)):
     with db.begin():
         rate_recipe_service(db=db, payload=payload)
+
+@router.get("/recommendations/{firebase_uid}")
+def get_recommendations(firebase_uid: str, request: Request, limit: int = 5, db: Session = Depends(get_db)):
+    return service.recommend_for_user(request=request, db=db, firebase_uid=firebase_uid, limit=limit)

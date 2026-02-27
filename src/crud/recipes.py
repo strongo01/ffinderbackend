@@ -58,3 +58,9 @@ def create_user(firebase_uid: str, db: Session):
     db.add(obj)
     db.flush()
     return obj
+
+def get_user_interactions(db: Session, firebase_uid: str):
+    user = get_user_by_firebase_id(firebase_uid=firebase_uid, db=db)
+    if not user:
+        return []
+    return db.query(RecipeInteraction).filter_by(user_id=user.id).all()
