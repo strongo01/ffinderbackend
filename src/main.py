@@ -1,7 +1,8 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from src.api.routers import routers
 from contextlib import asynccontextmanager
 import src.startup as startup
+from src.core.security import verify_app_key
 
 
 @asynccontextmanager
@@ -13,7 +14,7 @@ async def lifespan(app: FastAPI):
     app.state.recipe_cache = recipe_cache
     yield
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan, dependencies=[Depends(verify_app_key)])
 
 for router in routers:
     app.include_router(router)
