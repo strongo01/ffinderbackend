@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from src.db.deps import get_db
 from sqlalchemy import text
 
-router = APIRouter(prefix="/health")
+router = APIRouter(prefix="/health", tags=["Health"])
 
 @router.get("", response_model=HealthOk)
 def health():

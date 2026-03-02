@@ -7,7 +7,7 @@ import json
 from sqlalchemy import select, text
 from src.core.errors import RecipeNotFound
 
-router = APIRouter(prefix="/recipes")
+router = APIRouter(prefix="/recipes", tags=["Recipes"])
 
 service = RecommendationService()
 
