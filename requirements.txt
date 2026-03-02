@@ -5,4 +5,4 @@ psycopg[binary,pool]
 python-dotenv
 alembic
 numpy
-pymongo[srv]
+pymongo
