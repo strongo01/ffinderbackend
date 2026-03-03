@@ -3,6 +3,8 @@ from src.api.v2 import router as v2router
 from contextlib import asynccontextmanager
 import src.startup as startup
 from src.core.security import verify_app_key
+from src.api.core.stats_middleware import StatsLoggingMiddleware
+from src.api.core.error_middleware import ErrorLoggingMiddleware
 
 
 @asynccontextmanager
@@ -17,3 +19,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan, dependencies=[Depends(verify_app_key)])
 
 app.include_router(v2router)
+
+app.add_middleware(ErrorLoggingMiddleware)
+app.add_middleware(StatsLoggingMiddleware)  
