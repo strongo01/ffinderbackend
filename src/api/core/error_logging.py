@@ -1,5 +1,8 @@
 import logging
 from logging.handlers import RotatingFileHandler
+import os
+
+os.makedirs("logs", exist_ok=True)
 
 error_logger = logging.getLogger("error_logger")
 error_logger.setLevel(logging.ERROR)
