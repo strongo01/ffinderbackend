@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Depends
-from src.api.routers import routers
+from src.api.v2 import router as v2router
 from contextlib import asynccontextmanager
 import src.startup as startup
 from src.core.security import verify_app_key
@@ -16,5 +16,4 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan, dependencies=[Depends(verify_app_key)])
 
-for router in routers:
-    app.include_router(router)
+app.include_router(v2router)
