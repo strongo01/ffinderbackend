@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 import src.startup as startup
 from src.core.security import verify_app_key
 from src.api.core.stats_middleware import StatsLoggingMiddleware
+from src.api.core.error_middleware import ErrorLoggingMiddleware
 
 
 @asynccontextmanager
@@ -20,4 +21,5 @@ app = FastAPI(lifespan=lifespan, dependencies=[Depends(verify_app_key)])
 for router in routers:
     app.include_router(router)
 
+app.add_middleware(ErrorLoggingMiddleware)
 app.add_middleware(StatsLoggingMiddleware)  
