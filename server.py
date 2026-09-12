@@ -1,20 +1,25 @@
 import os
 import json
 import sqlite3
-import pandas as pd
-import numpy as np
+import random
+import logging
+import time
+import math
+from collections import Counter, defaultdict
+
 from fastapi import FastAPI, Body, HTTPException, Request
 from typing import Any, List, Optional
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
-import random
-import logging 
-import time
 
 recipes_df = None
-tfidf_matrix = None
 raw_json_data = None
 manipulated_recipes_data = None
+recipe_ids = []
+recipe_titles = {}
+recipe_features = {}
+feature_postings = defaultdict(list)
+feature_idf = {}
 
 os.makedirs("logs", exist_ok=True)
 logger = logging.getLogger("request")
@@ -30,7 +35,8 @@ logger.propagate = False
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global recipes_df, tfidf_matrix, raw_json_data, manipulated_recipes_data
+    global recipes_df, raw_json_data, manipulated_recipes_data
+    global recipe_ids, recipe_titles, recipe_features, feature_postings, feature_idf
 
     # Ensure ratings table exists
     with sqlite3.connect("ratings.db") as conn:
@@ -70,25 +76,34 @@ async def lifespan(app: FastAPI):
     with open("recipes_for_cbrs.json", "r", encoding="utf-8") as f:
         raw_json_data = json.load(f)
 
-    flattened_data = []
+    recipe_ids = []
+    recipe_titles = {}
+    recipe_features = {}
+    feature_postings = defaultdict(list)
+    feature_document_counts = Counter()
+
     for recipe in raw_json_data:
+        rid = recipe["id"]
         features = (recipe["features"]["ingredients"] +
                     recipe["features"]["tags"] +
                     recipe["features"]["kitchen"] +
                     recipe["features"]["course"])
-        flattened_data.append({"id": recipe["id"], "title": recipe["title"], "content": features})
+        counts = Counter(features)
+        recipe_ids.append(rid)
+        recipe_titles[rid] = recipe["title"]
+        recipe_features[rid] = counts
+        for feature in counts:
+            feature_document_counts[feature] += 1
 
-    recipes_df = pd.DataFrame(flattened_data)
-    exploded = recipes_df.explode("content")
-    binary_matrix = pd.crosstab(exploded["id"], exploded["content"])
+    total_recipes = len(recipe_ids)
+    for feature, count in feature_document_counts.items():
+        feature_idf[feature] = math.log(total_recipes / (count + 1))
+    for rid, counts in recipe_features.items():
+        for feature, frequency in counts.items():
+            feature_postings[feature].append((rid, frequency * feature_idf[feature]))
 
-    total_recipes = len(recipes_df)
-    item_counts = (binary_matrix > 0).sum(axis=0)
-    idf = np.log(total_recipes / (item_counts + 1))
-    tfidf_matrix = binary_matrix * idf
-
-    # Avoid keeping manipulated_recipes in memory
-    manipulated_recipes_data = None
+    # Keep only compact recipe metadata; scoring uses the sparse postings above.
+    recipes_df = None
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -245,145 +260,83 @@ async def rate_recipe(rating: Rating):
                      (rating.user_id, rating.recipe_id, rating.rating))
     return {"status": "success"}
 
+def _recipe_results(selected_ids):
+    if not selected_ids:
+        return []
+    placeholders = ",".join("?" for _ in selected_ids)
+    with sqlite3.connect("ratings.db") as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(f"SELECT id, data FROM recipes WHERE id IN ({placeholders})", selected_ids).fetchall()
+    by_id = {row["id"]: row["data"] for row in rows}
+    results = []
+    for recipe_id in selected_ids:
+        data = by_id.get(recipe_id)
+        if not data:
+            continue
+        try:
+            recipe = json.loads(data)
+        except Exception:
+            recipe = {"id": recipe_id}
+        title = recipe.get("title", "")
+        recipe["image_link"] = f"https://placehold.co/600x400?text={title.replace(' ', '+')}"
+        results.append(recipe)
+    return results
+
+
+def _fallback_recommendations(recipe_popularity, limit):
+    popular = sorted(recipe_ids, key=lambda rid: recipe_popularity.get(rid, 0), reverse=True)
+    num_popular = max(1, int(limit * 0.8))
+    selected = popular[:num_popular]
+    remaining = [rid for rid in recipe_ids if rid not in set(selected)]
+    selected.extend(random.sample(remaining, min(limit - len(selected), len(remaining))))
+    return _recipe_results(selected[:limit])
+
+
 @app.get("/recipes/get_recommendations/{user_id}")
 async def get_recommendations(user_id: str, limit: int = 5):
     with sqlite3.connect("ratings.db") as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute("SELECT recipe_id, rating FROM ratings WHERE user_id = ?", (user_id,)).fetchall()
         all_ratings = conn.execute("SELECT recipe_id, COUNT(*) as count FROM ratings GROUP BY recipe_id").fetchall()
-    
-    recipe_popularity = {row["recipe_id"]: row["count"] for row in all_ratings}
-    
-    if not rows:
-        all_recipes = recipes_df['id'].tolist()
-        popular_recipes = sorted(all_recipes, key=lambda x: recipe_popularity.get(x, 0), reverse=True)
-        
-        num_popular = max(1, int(limit * 0.8))
-        num_random = limit - num_popular
-        
-        selected = popular_recipes[:num_popular]
-        remaining = [r for r in all_recipes if r not in selected]
-        random_selections = random.sample(remaining, min(num_random, len(remaining)))
-        selected.extend(random_selections)
-        
-        results = []
-        with sqlite3.connect("ratings.db") as conn:
-            conn.row_factory = sqlite3.Row
-            for recipe_id in selected:
-                row = conn.execute("SELECT data FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
-                if row and row['data']:
-                    try:
-                        recipe = json.loads(row['data'])
-                    except Exception:
-                        recipe = {"id": recipe_id}
-                    title = recipe.get('title', '')
-                    recipe_with_image = dict(recipe)
-                    recipe_with_image['image_link'] = f"https://placehold.co/600x400?text={title.replace(' ', '+')}"
-                    results.append(recipe_with_image)
-        return results
 
-    user_ratings_series = pd.Series({row["recipe_id"]: row["rating"] for row in rows})
-    rated_recipe_ids = set(user_ratings_series.index)
-    
-    valid_ids = user_ratings_series.index.intersection(tfidf_matrix.index)
-    # If no valid rated recipes exist in the CBRS dataset, fall back to popularity-based recommendations
-    if valid_ids.empty:
-        all_recipes = recipes_df['id'].tolist()
-        popular_recipes = sorted(all_recipes, key=lambda x: recipe_popularity.get(x, 0), reverse=True)
-        
-        num_popular = max(1, int(limit * 0.8))
-        num_random = limit - num_popular
-        
-        selected = popular_recipes[:num_popular]
-        remaining = [r for r in all_recipes if r not in selected]
-        random_selections = random.sample(remaining, min(num_random, len(remaining)))
-        selected.extend(random_selections)
-        
-        results = []
-        with sqlite3.connect("ratings.db") as conn:
-            conn.row_factory = sqlite3.Row
-            for recipe_id in selected:
-                row = conn.execute("SELECT data FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
-                if row and row['data']:
-                    try:
-                        recipe = json.loads(row['data'])
-                    except Exception:
-                        recipe = {"id": recipe_id}
-                    title = recipe.get('title', '')
-                    recipe_with_image = dict(recipe)
-                    recipe_with_image['image_link'] = f"https://placehold.co/600x400?text={title.replace(' ', '+')}"
-                    results.append(recipe_with_image)
-        return results
-        
-    user_features_matrix = tfidf_matrix.loc[valid_ids]
-    user_profile = user_features_matrix.T.dot(user_ratings_series.loc[valid_ids])
-    
-    scores = (tfidf_matrix.dot(user_profile) / user_profile.sum())
-    
-    results = recipes_df[['id', 'title']].set_index('id').copy()
-    results['score'] = scores
-    results['popularity'] = results.index.map(lambda x: recipe_popularity.get(x, 0))
-    
-    unrated = results[~results.index.isin(rated_recipe_ids)].copy()
-    
+    recipe_popularity = {row["recipe_id"]: row["count"] for row in all_ratings}
+    if not rows:
+        return _fallback_recommendations(recipe_popularity, limit)
+
+    user_ratings = {row["recipe_id"]: row["rating"] for row in rows}
+    valid_ratings = {rid: rating for rid, rating in user_ratings.items() if rid in recipe_features}
+    if not valid_ratings:
+        return _fallback_recommendations(recipe_popularity, limit)
+
+    user_profile = defaultdict(float)
+    for recipe_id, rating in valid_ratings.items():
+        for feature, frequency in recipe_features[recipe_id].items():
+            user_profile[feature] += frequency * feature_idf[feature] * rating
+
+    profile_weight = sum(user_profile.values())
+    if not profile_weight:
+        return _fallback_recommendations(recipe_popularity, limit)
+
+    scores = defaultdict(float)
+    for feature, profile_value in user_profile.items():
+        for recipe_id, feature_weight in feature_postings[feature]:
+            scores[recipe_id] += feature_weight * profile_value
+
+    rated_ids = set(user_ratings)
+    unrated_ids = [rid for rid in recipe_ids if rid not in rated_ids]
     num_recommendations = max(1, int(limit * 0.8))
     num_popular = max(0, int(limit * 0.15))
     num_random = limit - num_recommendations - num_popular
-    
-    if len(unrated) == 0:
-        all_recipes = recipes_df['id'].tolist()
-        popular_recipes = sorted(all_recipes, key=lambda x: recipe_popularity.get(x, 0), reverse=True)
-        selected = popular_recipes[:limit]
-        
-        results_list = []
-        with sqlite3.connect("ratings.db") as conn:
-            conn.row_factory = sqlite3.Row
-            for recipe_id in selected:
-                row = conn.execute("SELECT data FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
-                if row and row['data']:
-                    try:
-                        recipe = json.loads(row['data'])
-                    except Exception:
-                        recipe = {"id": recipe_id}
-                    title = recipe.get('title', '')
-                    recipe_with_image = dict(recipe)
-                    recipe_with_image['image_link'] = f"https://placehold.co/600x400?text={title.replace(' ', '+')}"
-                    results_list.append(recipe_with_image)
-        return results_list
-    
-    recommendation_items = unrated.nlargest(num_recommendations, 'score')
-    remaining = unrated[~unrated.index.isin(recommendation_items.index)]
-    
-    popular_items = remaining.nlargest(num_popular, 'popularity')
-    remaining = remaining[~remaining.index.isin(popular_items.index)]
-    
-    if num_random > 0 and len(remaining) > 0:
-        random_items = remaining.sample(n=min(num_random, len(remaining)))
-    else:
-        random_items = pd.DataFrame()
-    
-    candidates = pd.concat([recommendation_items, popular_items, random_items])
-    if len(candidates) < limit and len(unrated) > len(candidates):
-        already_selected = set(candidates.index)
-        unfilled = unrated[~unrated.index.isin(already_selected)].nlargest(limit - len(candidates), 'popularity')
-        candidates = pd.concat([candidates, unfilled])
-    
-    final_results = candidates.reset_index()[['id', 'title']].head(limit)
-    
-    results_list = []
-    with sqlite3.connect("ratings.db") as conn:
-        conn.row_factory = sqlite3.Row
-        for idx, row in final_results.iterrows():
-            rid = row['id'] if 'id' in row else idx
-            db_row = conn.execute("SELECT data FROM recipes WHERE id = ?", (rid,)).fetchone()
-            if db_row and db_row['data']:
-                try:
-                    recipe = json.loads(db_row['data'])
-                except Exception:
-                    recipe = {"id": rid}
-                title = recipe.get('title', '')
-                recipe_with_image = dict(recipe)
-                recipe_with_image['image_link'] = f"https://placehold.co/600x400?text={title.replace(' ', '+')}"
-                results_list.append(recipe_with_image)
-    
-    return results_list
+
+    recommendation_ids = sorted(unrated_ids, key=lambda rid: scores.get(rid, 0), reverse=True)[:num_recommendations]
+    remaining = [rid for rid in unrated_ids if rid not in set(recommendation_ids)]
+    popular_ids = sorted(remaining, key=lambda rid: recipe_popularity.get(rid, 0), reverse=True)[:num_popular]
+    remaining = [rid for rid in remaining if rid not in set(popular_ids)]
+    random_ids = random.sample(remaining, min(num_random, len(remaining))) if num_random > 0 else []
+
+    selected = recommendation_ids + popular_ids + random_ids
+    if len(selected) < limit:
+        selected_set = set(selected)
+        selected.extend(rid for rid in sorted(unrated_ids, key=lambda x: recipe_popularity.get(x, 0), reverse=True) if rid not in selected_set)
+        selected = selected[:limit]
+    return _recipe_results(selected)
