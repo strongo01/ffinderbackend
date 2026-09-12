@@ -4,3 +4,6 @@ package-lock.json
 __pycache__/
 venv/
 logs/
+products.db
+products.compact.jsonl
+backups/

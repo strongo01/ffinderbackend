@@ -1,6 +1,6 @@
 import express from "express";
 import fetch from "node-fetch";
-import { MongoClient } from "mongodb";
+import Database from "better-sqlite3";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -19,11 +19,20 @@ app.use((req, res, next) => {
   next();
 });
 
-const uri = process.env.MONGO_URI;
-const client = new MongoClient(uri);
-await client.connect();
-const db = client.db("off_db");
-const products = db.collection("products");
+const productDbPath = process.env.PRODUCT_DB_PATH || "./products.db";
+const productDb = new Database(productDbPath, { readonly: true, fileMustExist: true });
+productDb.pragma("query_only = ON");
+const productByBarcode = productDb.prepare("SELECT * FROM products WHERE barcode = ?");
+function searchProducts(query) {
+  const terms = query.trim().split(/\s+/).filter(Boolean);
+  if (!terms.length) return [];
+  const clauses = terms.map(() => "(lower(coalesce(product_name, '')) LIKE ? OR lower(coalesce(generic_name, '')) LIKE ? OR lower(coalesce(brands, '')) LIKE ?)").join(" OR ");
+  const values = terms.flatMap((term) => {
+    const pattern = `%${term.toLowerCase()}%`;
+    return [pattern, pattern, pattern];
+  });
+  return productDb.prepare(`SELECT * FROM products WHERE ${clauses} LIMIT 50`).all(...values);
+}
 
 // --- Helper Functions ---
 function isBarcode(str) {
@@ -32,30 +41,29 @@ function isBarcode(str) {
 
 function formatProduct(p) {
   if (!p) return null;
-  const n = p.nutriments || {};
-  const tags = Array.isArray(p.ingredients_analysis_tags) ? p.ingredients_analysis_tags : [];
-  const imageUrl = p.image_url || p.image_front_url || p.selected_images?.front?.display?.en || p.image_front_small_url || p.image_small_url || null;
-  const servingSize = p.serving_size || p.serving_size_with_unit || p.serving_quantity || null;
+  const n = p;
+  const imageUrl = p.image_url || null;
+  const servingSize = p.serving_size || null;
 
   return {
-    barcode: p.code || null,
+    barcode: p.barcode || null,
     product_name: p.product_name || null,
-    brands: p.brands || p.brand || null,
-    nutriscore: p.nutriscore_grade || null,
+    brands: p.brands || null,
+    nutriscore: p.nutriscore || null,
     serving_size: servingSize,
     nutriments: {
-      energy_kcal: n["energy-kcal_100g"] ?? null,
-      fat: n.fat_100g ?? null,
-      saturated_fat: n["saturated-fat_100g"] ?? null,
-      carbohydrates: n.carbohydrates_100g ?? null,
-      sugars: n.sugars_100g ?? null,
-      fiber: n.fiber_100g ?? null,
-      proteins: n.proteins_100g ?? null,
-      salt: n.salt_100g ?? null,
+      energy_kcal: n.energy_kcal ?? null,
+      fat: n.fat ?? null,
+      saturated_fat: n.saturated_fat ?? null,
+      carbohydrates: n.carbohydrates ?? null,
+      sugars: n.sugars ?? null,
+      fiber: n.fiber ?? null,
+      proteins: n.proteins ?? null,
+      salt: n.salt ?? null,
     },
-    ingredients: p.ingredients_text || null,
-    vegan: tags.includes("en:vegan"),
-    vegetarian: tags.includes("en:vegetarian"),
+    ingredients: p.ingredients || null,
+    vegan: Boolean(p.vegan),
+    vegetarian: Boolean(p.vegetarian),
     image_url: imageUrl,
   };
 }
@@ -66,13 +74,10 @@ app.get("/product", async (req, res) => {
   if (!query) return res.status(400).json({ error: "q ontbreekt" });
   let results = [];
   if (isBarcode(query)) {
-    const p = await products.findOne({ code: query });
+    const p = productByBarcode.get(query);
     if (p) results.push(formatProduct(p));
   } else {
-    const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const regex = new RegExp(escapedQuery.split(" ").join("|"), "i");
-    const cursor = products.find({ $or: [{ product_name: regex }, { generic_name: regex }, { brands: regex }] }).limit(50);
-    results = (await cursor.toArray()).map(formatProduct);
+    results = searchProducts(query).map(formatProduct);
   }
   res.json({ foods: { food: results } });
 });
