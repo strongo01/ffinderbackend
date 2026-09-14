@@ -21,6 +21,13 @@ recipe_features = {}
 feature_postings = defaultdict(list)
 feature_idf = {}
 
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://ffinder.nl").rstrip("/")
+
+
+def recipe_image_url(recipe_id: int) -> str:
+    return f"{PUBLIC_BASE_URL}/recipe-images/{recipe_id}.jpg"
+
+
 os.makedirs("logs", exist_ok=True)
 logger = logging.getLogger("request")
 file_handler = logging.FileHandler("logs/app.log")
@@ -190,12 +197,11 @@ async def search_recipes(
     results = []
     for row in rows:
         original_title = row["title"] or ""
-        url_title = original_title.replace(" ", "-")
         
         results.append({
             'id': row['id'],
             'title': original_title,
-            'image_link': f"https://boodschappen.nl/app/uploads/recipe_images/4by3_header@2x/{url_title.lower()}.jpg"
+            'image_link': recipe_image_url(row['id'])
         })
 
     return results
@@ -249,8 +255,7 @@ async def get_recipe_by_id(recipe_id: int):
 
     recipe = json.loads(row['data'])
     recipe_with_image = dict(recipe)
-    title = recipe.get('title', '')
-    recipe_with_image['image_link'] = f"https://placehold.co/600x400?text={title.replace(' ', '+')}"
+    recipe_with_image['image_link'] = recipe_image_url(recipe_id)
     return recipe_with_image
 
 @app.post("/recipes/rate")
@@ -277,8 +282,7 @@ def _recipe_results(selected_ids):
             recipe = json.loads(data)
         except Exception:
             recipe = {"id": recipe_id}
-        title = recipe.get("title", "")
-        recipe["image_link"] = f"https://placehold.co/600x400?text={title.replace(' ', '+')}"
+        recipe["image_link"] = recipe_image_url(recipe_id)
         results.append(recipe)
     return results
 

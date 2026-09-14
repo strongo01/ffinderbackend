@@ -10,6 +10,13 @@ const PORT = 3000;
 
 app.use(express.json());
 
+const recipeImagesDir = process.env.RECIPE_IMAGES_DIR || "/home/triskattie/fatsecret/recipe_images_api";
+app.use("/recipe-images", express.static(recipeImagesDir, {
+  maxAge: "30d",
+  immutable: true,
+  fallthrough: false,
+}));
+
 // Auth Middleware
 app.use((req, res, next) => {
   const appKey = req.headers["x-app-key"];
