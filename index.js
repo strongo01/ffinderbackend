@@ -11,6 +11,12 @@ const PORT = 3000;
 app.use(express.json());
 
 const recipeImagesDir = process.env.RECIPE_IMAGES_DIR || "/home/triskattie/fatsecret/recipe_images_api";
+app.get("/recipe-images/:recipeId", (req, res, next) => {
+  if (!/^\d+$/.test(req.params.recipeId)) return next();
+  res.sendFile(`${recipeImagesDir}/${req.params.recipeId}.jpg`, (err) => {
+    if (err && !res.headersSent) res.sendStatus(err.statusCode || 404);
+  });
+});
 app.use("/recipe-images", express.static(recipeImagesDir, {
   maxAge: "30d",
   immutable: true,
@@ -170,6 +176,19 @@ app.get("/recipes/recommendations/:userId", async (req, res) => {
     if (!response.ok) return res.status(response.status).json({ error: "Failed to get recommendations" });
     const data = await response.json();
     res.json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch recommendations" });
+  }
+});
+
+app.get("/recipes/get_recommendations/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { limit = 5 } = req.query;
+    const response = await fetch(`${PYTHON_SERVER_URL}/recipes/get_recommendations/${userId}?limit=${limit}`);
+    if (!response.ok) return res.status(response.status).json({ error: "Failed to get recommendations" });
+    res.json(await response.json());
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch recommendations" });
